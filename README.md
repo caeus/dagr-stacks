@@ -36,17 +36,11 @@ export default tsLibrary({
 The alias belongs to the consuming repository. The directory and commit being mounted are explicit,
 reviewable build inputs.
 
-## Repository layout
+## Available stacks
 
-```text
-dagr-stacks/
-├── ts-library/
-│   └── dagr.stack.js
-├── ts-application/
-│   └── dagr.stack.js
-└── rust-crate/
-    └── dagr.stack.js
-```
+| Stack | Description |
+| --- | --- |
+| [`ts-library`](ts-library/) | Curried TypeScript library stack with generated manifests, build, pack, typecheck, and local dependency tarballs |
 
 Stacks stay together here until one genuinely requires separate ownership, permissions, or release
 infrastructure.

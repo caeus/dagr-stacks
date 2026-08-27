@@ -44,105 +44,105 @@ export default function typescript({
     deps = [],
     packageJson = {},
   }) {
-  const name = projectName(location, scope)
-  const slug = name.slice(name.indexOf('/') + 1)
-  const localDeps = deps.filter(d => 'pkg' in d)
-  const packTarget = dep => `${dep.pkg}:ci:pack`
-  const packTargets = localDeps.map(packTarget)
-  const manifest = buildPackageJson({
-    name, scope, version, deps, coreDevDeps: CORE_DEV_DEPS, versions,
-    extra: {
-      main: './dist/index.js',
-      types: './dist/index.d.ts',
-      exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } },
-      files: ['dist'],
-      ...packageJson,
-    }
-  })
+    const name = projectName(location, scope)
+    const slug = name.slice(name.indexOf('/') + 1)
+    const localDeps = deps.filter(d => 'pkg' in d)
+    const packTarget = dep => `${dep.pkg}:ci:pack`
+    const packTargets = localDeps.map(packTarget)
+    const manifest = buildPackageJson({
+      name, scope, version, deps, coreDevDeps: CORE_DEV_DEPS, versions,
+      extra: {
+        main: './dist/index.js',
+        types: './dist/index.d.ts',
+        exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } },
+        files: ['dist'],
+        ...packageJson,
+      }
+    })
 
-  const index = {
-    config: {
-      manifest: {
-        deps: [base],
-        run: ({ images: d }) => ({
-          FROM: d[base],
-          steps: [
-            { WORKDIR: '/repo' },
-            writeJson('/repo/package.json', manifest),
-            writeJson('/repo/tsconfig.json', tsconfig),
-            writeJson('/repo/.prettierrc.json', prettier),
-          ],
-          IGNORE: ignore,
-        })
-      }
-    },
-    dev: {
-      sync: {
-        deps: ['config:manifest'],
-        run: ({ images: d }) => ({
-          FROM: d['config:manifest'],
-          steps: [],
-          IGNORE: ignore,
-          EXPORT: Object.fromEntries(MANIFESTS.map(f => [`/repo/${f}`, f])),
-        })
-      }
-    },
-    ci: {
-      install: {
-        deps: ['config:manifest', ...packTargets],
-        run: ({ images: d }) => ({
-          FROM: d['config:manifest'],
-          steps: [
-            ...localDeps.map(dep => ({
-              COPY: { from: d[packTarget(dep)], src: '/out', dest: '/repo' }
-            })),
-            { WORKDIR: '/repo' },
-            writeText('/repo/.pnpmfile.cjs', pnpmfile(scope)),
-            { RUN: 'pnpm install --prod=false' },
-          ],
-          IGNORE: ignore,
-        })
+    const index = {
+      config: {
+        manifest: {
+          deps: [base],
+          run: ({ images: d }) => ({
+            FROM: d[base],
+            steps: [
+              { WORKDIR: '/repo' },
+              writeJson('/repo/package.json', manifest),
+              writeJson('/repo/tsconfig.json', tsconfig),
+              writeJson('/repo/.prettierrc.json', prettier),
+            ],
+            IGNORE: ignore,
+          })
+        }
       },
-      build: {
-        deps: ['install'],
-        run: ({ images: d }) => ({
-          FROM: d['install'],
-          steps: [
-            { COPY: { src: 'src', dest: '/repo/src' } },
-            { WORKDIR: '/repo' },
-            { RUN: 'pnpm exec tsc --outDir dist --declaration --noEmit false' },
-          ],
-          IGNORE: ignore,
-        })
+      dev: {
+        sync: {
+          deps: ['config:manifest'],
+          run: ({ images: d }) => ({
+            FROM: d['config:manifest'],
+            steps: [],
+            IGNORE: ignore,
+            EXPORT: Object.fromEntries(MANIFESTS.map(f => [`/repo/${f}`, f])),
+          })
+        }
       },
-      pack: {
-        deps: ['build', ...packTargets],
-        run: ({ images: d }) => ({
-          FROM: d['build'],
-          steps: [
-            ...localDeps.map(dep => ({
-              COPY: { from: d[packTarget(dep)], src: '/out', dest: '/out' }
-            })),
-            { WORKDIR: '/repo' },
-            { RUN: `mkdir -p /tmp/pack /out && pnpm pack --pack-destination /tmp/pack && mv /tmp/pack/*.tgz /out/${slug}.tgz` },
-          ],
-          IGNORE: ignore,
-        })
-      },
-      typecheck: {
-        deps: ['install'],
-        run: ({ images: d }) => ({
-          FROM: d['install'],
-          steps: [
-            { COPY: { src: 'src', dest: '/repo/src' } },
-            { WORKDIR: '/repo' },
-            { RUN: 'pnpm exec tsc --noEmit' },
-          ],
-          IGNORE: ignore,
-        })
+      ci: {
+        install: {
+          deps: ['config:manifest', ...packTargets],
+          run: ({ images: d }) => ({
+            FROM: d['config:manifest'],
+            steps: [
+              ...localDeps.map(dep => ({
+                COPY: { from: d[packTarget(dep)], src: '/out', dest: '/repo' }
+              })),
+              { WORKDIR: '/repo' },
+              writeText('/repo/.pnpmfile.cjs', pnpmfile(scope)),
+              { RUN: 'pnpm install --prod=false' },
+            ],
+            IGNORE: ignore,
+          })
+        },
+        build: {
+          deps: ['install'],
+          run: ({ images: d }) => ({
+            FROM: d['install'],
+            steps: [
+              { COPY: { src: 'src', dest: '/repo/src' } },
+              { WORKDIR: '/repo' },
+              { RUN: 'pnpm exec tsc --outDir dist --declaration --noEmit false' },
+            ],
+            IGNORE: ignore,
+          })
+        },
+        pack: {
+          deps: ['build', ...packTargets],
+          run: ({ images: d }) => ({
+            FROM: d['build'],
+            steps: [
+              ...localDeps.map(dep => ({
+                COPY: { from: d[packTarget(dep)], src: '/out', dest: '/out' }
+              })),
+              { WORKDIR: '/repo' },
+              { RUN: `mkdir -p /tmp/pack /out && pnpm pack --pack-destination /tmp/pack && mv /tmp/pack/*.tgz /out/${slug}.tgz` },
+            ],
+            IGNORE: ignore,
+          })
+        },
+        typecheck: {
+          deps: ['install'],
+          run: ({ images: d }) => ({
+            FROM: d['install'],
+            steps: [
+              { COPY: { src: 'src', dest: '/repo/src' } },
+              { WORKDIR: '/repo' },
+              { RUN: 'pnpm exec tsc --noEmit' },
+            ],
+            IGNORE: ignore,
+          })
+        }
       }
     }
-  }
 
     return transform(index, { location, name, slug, manifest })
   }

@@ -25,11 +25,16 @@ Each top-level directory contains one independently consumable stack:
 A consuming repository mounts a stack under `stacks/<alias>` and imports across the mount boundary:
 
 ```js
-import tsLibrary from '//stacks/ts-library//dagr.stack.js'
+import typescript from '//stacks/ts-library//dagr.stack.js'
 
-export default tsLibrary({
-  name: 'common',
-  deps: ['zod'],
+const stack = typescript({
+  base: '//packages/base:ci:node-pnpm',
+  scope: 'internal',
+})
+
+export default stack({
+  location: import.meta.dagr.location,
+  deps: [{ npm: 'zod', at: 'prod' }],
 })
 ```
 

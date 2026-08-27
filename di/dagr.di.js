@@ -1,6 +1,6 @@
 /**
  * @template T
- * @typedef {(...dependencies: any[]) => T} Factory
+ * @typedef {(...dependencies: unknown[]) => T} Factory
  */
 
 /**
@@ -13,7 +13,7 @@
  * }>} Definition
  */
 
-/** @typedef {Record<string, Definition<any>>} Bindings */
+/** @typedef {Record<string, Definition<unknown>>} Bindings */
 
 const bindingName = name => JSON.stringify(name)
 
@@ -56,7 +56,7 @@ export function toFun(deps, factory) {
 /**
  * @template T
  * @param {readonly string[]} deps
- * @param {new (...dependencies: any[]) => T} Class
+ * @param {new (...dependencies: unknown[]) => T} Class
  * @returns {Definition<T>}
  */
 export function toClass(deps, Class) {
@@ -70,7 +70,7 @@ export function toClass(deps, Class) {
  * Copies and freezes user-provided definitions at the module boundary.
  *
  * @param {Bindings} bindings
- * @returns {Map<string, Definition<any>>}
+ * @returns {Map<string, Definition<unknown>>}
  */
 function normalize(bindings) {
   if (bindings === null || typeof bindings !== 'object' || Array.isArray(bindings)) {
@@ -89,10 +89,10 @@ function normalize(bindings) {
 
 /** An immutable dependency graph that can be transformed and compiled. */
 class Module {
-  /** @type {Map<string, Definition<any>>} */
+  /** @type {Map<string, Definition<unknown>>} */
   #bindings
 
-  /** @param {Map<string, Definition<any>>} bindings */
+  /** @param {Map<string, Definition<unknown>>} bindings */
   constructor(bindings) {
     this.#bindings = bindings
     Object.freeze(this)
@@ -100,7 +100,7 @@ class Module {
 
   /**
    * @param {string} name
-   * @returns {Definition<any> | undefined}
+   * @returns {Definition<unknown> | undefined}
    */
   definitionOf(name) {
     return this.#bindings.get(name)
@@ -158,7 +158,7 @@ class Module {
   /**
    * Eagerly resolves every binding once. Values, including promises, are never awaited or unwrapped.
    *
-   * @returns {Readonly<Record<string, any>>}
+   * @returns {Readonly<Record<string, unknown>>}
    */
   compile() {
     const values = new Map()
@@ -167,7 +167,7 @@ class Module {
     /**
      * @param {string} name
      * @param {string | undefined} [requiredBy]
-     * @returns {any}
+     * @returns {unknown}
      */
     const resolve = (name, requiredBy) => {
       if (values.has(name)) return values.get(name)
@@ -197,7 +197,7 @@ class Module {
 
     for (const name of this.#bindings.keys()) resolve(name)
 
-    /** @type {Record<string, any>} */
+    /** @type {Record<string, unknown>} */
     const container = Object.create(null)
     for (const [name, value] of values) {
       Object.defineProperty(container, name, {

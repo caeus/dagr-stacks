@@ -1,5 +1,3 @@
-const modules = new WeakMap()
-
 const isPromiseLike = value =>
   value !== null &&
   (typeof value === 'object' || typeof value === 'function') &&
@@ -48,101 +46,102 @@ function normalize(bindings) {
   )
 }
 
-function createModule(bindings) {
-  const api = {
-    definitionOf(name) {
-      return bindings.get(name)
-    },
+class Module {
+  #bindings
 
-    keys() {
-      return bindings.keys()
-    },
-
-    merge(other) {
-      const overrides = modules.get(other)
-      if (!overrides) throw new TypeError('Can only merge another DI module')
-      return createModule(new Map([...bindings, ...overrides]))
-    },
-
-    shake(roots) {
-      if (!Array.isArray(roots) || roots.some(root => typeof root !== 'string')) {
-        throw new TypeError('Shake roots must be an array of strings')
-      }
-
-      const retained = new Set()
-      const visit = (name, requiredBy) => {
-        const binding = bindings.get(name)
-        if (!binding) {
-          const suffix = requiredBy === undefined
-            ? ''
-            : ` required by ${bindingName(requiredBy)}`
-          throw new Error(`Missing binding ${bindingName(name)}${suffix}`)
-        }
-        if (retained.has(name)) return
-        retained.add(name)
-        for (const dep of binding.deps) visit(dep, name)
-      }
-
-      for (const root of roots) visit(root)
-      return createModule(new Map([...bindings].filter(([name]) => retained.has(name))))
-    },
-
-    compile() {
-      const values = new Map()
-      const resolving = []
-
-      const resolve = (name, requiredBy) => {
-        if (values.has(name)) return values.get(name)
-
-        const binding = bindings.get(name)
-        if (!binding) {
-          const suffix = requiredBy === undefined
-            ? ''
-            : ` required by ${bindingName(requiredBy)}`
-          throw new Error(`Missing binding ${bindingName(name)}${suffix}`)
-        }
-
-        const cycleAt = resolving.indexOf(name)
-        if (cycleAt !== -1) {
-          throw new Error(`Circular dependency: ${[...resolving.slice(cycleAt), name].join(' -> ')}`)
-        }
-
-        resolving.push(name)
-        try {
-          const value = binding.factory(...binding.deps.map(dep => resolve(dep, name)))
-          if (isPromiseLike(value)) {
-            throw new TypeError(
-              `Binding ${bindingName(name)} returned a promise; async bindings are not supported`
-            )
-          }
-          values.set(name, value)
-          return value
-        } finally {
-          resolving.pop()
-        }
-      }
-
-      for (const name of bindings.keys()) resolve(name)
-
-      const container = Object.create(null)
-      for (const [name, value] of values) {
-        Object.defineProperty(container, name, {
-          value,
-          enumerable: true,
-          writable: false,
-          configurable: false,
-        })
-      }
-      return Object.freeze(container)
-    },
+  constructor(bindings) {
+    this.#bindings = bindings
+    Object.freeze(this)
   }
 
-  modules.set(api, bindings)
-  return Object.freeze(api)
+  definitionOf(name) {
+    return this.#bindings.get(name)
+  }
+
+  keys() {
+    return this.#bindings.keys()
+  }
+
+  merge(other) {
+    if (!(other instanceof Module)) throw new TypeError('Can only merge another DI module')
+    return new Module(new Map([...this.#bindings, ...other.#bindings]))
+  }
+
+  shake(roots) {
+    if (!Array.isArray(roots) || roots.some(root => typeof root !== 'string')) {
+      throw new TypeError('Shake roots must be an array of strings')
+    }
+
+    const retained = new Set()
+    const visit = (name, requiredBy) => {
+      const binding = this.#bindings.get(name)
+      if (!binding) {
+        const suffix = requiredBy === undefined
+          ? ''
+          : ` required by ${bindingName(requiredBy)}`
+        throw new Error(`Missing binding ${bindingName(name)}${suffix}`)
+      }
+      if (retained.has(name)) return
+      retained.add(name)
+      for (const dep of binding.deps) visit(dep, name)
+    }
+
+    for (const root of roots) visit(root)
+    return new Module(new Map([...this.#bindings].filter(([name]) => retained.has(name))))
+  }
+
+  compile() {
+    const values = new Map()
+    const resolving = []
+
+    const resolve = (name, requiredBy) => {
+      if (values.has(name)) return values.get(name)
+
+      const binding = this.#bindings.get(name)
+      if (!binding) {
+        const suffix = requiredBy === undefined
+          ? ''
+          : ` required by ${bindingName(requiredBy)}`
+        throw new Error(`Missing binding ${bindingName(name)}${suffix}`)
+      }
+
+      const cycleAt = resolving.indexOf(name)
+      if (cycleAt !== -1) {
+        throw new Error(`Circular dependency: ${[...resolving.slice(cycleAt), name].join(' -> ')}`)
+      }
+
+      resolving.push(name)
+      try {
+        const value = binding.factory(...binding.deps.map(dep => resolve(dep, name)))
+        if (isPromiseLike(value)) {
+          throw new TypeError(
+            `Binding ${bindingName(name)} returned a promise; async bindings are not supported`
+          )
+        }
+        values.set(name, value)
+        return value
+      } finally {
+        resolving.pop()
+      }
+    }
+
+    for (const name of this.#bindings.keys()) resolve(name)
+
+    const container = Object.create(null)
+    for (const [name, value] of values) {
+      Object.defineProperty(container, name, {
+        value,
+        enumerable: true,
+        writable: false,
+        configurable: false,
+      })
+    }
+    return Object.freeze(container)
+  }
 }
 
 export function module(bindings) {
-  return createModule(normalize(bindings))
+  return new Module(normalize(bindings))
 }
 
 export default Object.freeze({ module, toValue, toFun, toClass })

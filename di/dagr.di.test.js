@@ -68,8 +68,15 @@ describe('di', () => {
     assert.throws(() => module.compile(), /Circular dependency: a -> b -> a/)
   })
 
-  it('rejects async factories', () => {
-    const module = di.module({ value: toFun([], async () => 42) })
-    assert.throws(() => module.compile(), /async bindings are not supported/)
+  it('composes promises synchronously as ordinary values', () => {
+    const promise = Promise.resolve(42)
+    const module = di.module({
+      promise: toValue(promise),
+      injected: toFun(['promise'], value => value),
+    })
+
+    const container = module.compile()
+    assert.equal(container.promise, promise)
+    assert.equal(container.injected, promise)
   })
 })

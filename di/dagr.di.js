@@ -1,8 +1,3 @@
-const isPromiseLike = value =>
-  value !== null &&
-  (typeof value === 'object' || typeof value === 'function') &&
-  typeof value.then === 'function'
-
 const bindingName = name => JSON.stringify(name)
 
 function definition(deps, factory) {
@@ -113,11 +108,6 @@ class Module {
       resolving.push(name)
       try {
         const value = binding.factory(...binding.deps.map(dep => resolve(dep, name)))
-        if (isPromiseLike(value)) {
-          throw new TypeError(
-            `Binding ${bindingName(name)} returned a promise; async bindings are not supported`
-          )
-        }
         values.set(name, value)
         return value
       } finally {

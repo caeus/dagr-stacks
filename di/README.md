@@ -28,4 +28,4 @@ and their transitive dependencies.
 
 `compile()` takes no arguments and eagerly initializes every binding in the module exactly once.
 Shake first when bindings should be excluded from initialization. Missing dependencies, circular
-dependencies, and factories returning promises are rejected.
+dependencies are rejected. Promises are ordinary values: compilation never awaits or unwraps them.

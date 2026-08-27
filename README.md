@@ -25,28 +25,27 @@ Each top-level directory contains one independently consumable stack:
 A consuming repository mounts a stack under `stacks/<alias>` and imports across the mount boundary:
 
 ```js
-import tsLibrary from '//stacks/ts-library//dagr.stack.js'
+import typescript from '//stacks/ts-library//dagr.stack.js'
 
-export default tsLibrary({
-  name: 'common',
-  deps: ['zod'],
+const stack = typescript({
+  base: '//packages/base:ci:node-pnpm',
+  scope: 'internal',
+})
+
+export default stack({
+  location: import.meta.dagr.location,
+  deps: [{ npm: 'zod', at: 'prod' }],
 })
 ```
 
 The alias belongs to the consuming repository. The directory and commit being mounted are explicit,
 reviewable build inputs.
 
-## Repository layout
+## Available stacks
 
-```text
-dagr-stacks/
-├── ts-library/
-│   └── dagr.stack.js
-├── ts-application/
-│   └── dagr.stack.js
-└── rust-crate/
-    └── dagr.stack.js
-```
+| Stack | Description |
+| --- | --- |
+| [`ts-library`](ts-library/) | Curried TypeScript library stack with generated manifests, build, pack, typecheck, and local dependency tarballs |
 
 Stacks stay together here until one genuinely requires separate ownership, permissions, or release
 infrastructure.

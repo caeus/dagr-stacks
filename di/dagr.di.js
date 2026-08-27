@@ -1,5 +1,28 @@
+/**
+ * @template T
+ * @typedef {(...dependencies: any[]) => T} Factory
+ */
+
+/**
+ * A frozen recipe for producing one binding.
+ *
+ * @template T
+ * @typedef {Readonly<{
+ *   deps: readonly string[],
+ *   factory: Factory<T>
+ * }>} Definition
+ */
+
+/** @typedef {Record<string, Definition<any>>} Bindings */
+
 const bindingName = name => JSON.stringify(name)
 
+/**
+ * @template T
+ * @param {readonly string[]} deps
+ * @param {Factory<T>} factory
+ * @returns {Definition<T>}
+ */
 function definition(deps, factory) {
   if (!Array.isArray(deps) || deps.some(dep => typeof dep !== 'string')) {
     throw new TypeError('Binding dependencies must be an array of strings')
@@ -11,14 +34,31 @@ function definition(deps, factory) {
   return Object.freeze({ deps: Object.freeze([...deps]), factory })
 }
 
+/**
+ * @template T
+ * @param {T} value
+ * @returns {Definition<T>}
+ */
 export function toValue(value) {
   return definition([], () => value)
 }
 
+/**
+ * @template T
+ * @param {readonly string[]} deps
+ * @param {Factory<T>} factory
+ * @returns {Definition<T>}
+ */
 export function toFun(deps, factory) {
   return definition(deps, factory)
 }
 
+/**
+ * @template T
+ * @param {readonly string[]} deps
+ * @param {new (...dependencies: any[]) => T} Class
+ * @returns {Definition<T>}
+ */
 export function toClass(deps, Class) {
   if (typeof Class !== 'function') {
     throw new TypeError('Binding class must be a constructor')
@@ -26,6 +66,12 @@ export function toClass(deps, Class) {
   return definition(deps, (...args) => new Class(...args))
 }
 
+/**
+ * Copies and freezes user-provided definitions at the module boundary.
+ *
+ * @param {Bindings} bindings
+ * @returns {Map<string, Definition<any>>}
+ */
 function normalize(bindings) {
   if (bindings === null || typeof bindings !== 'object' || Array.isArray(bindings)) {
     throw new TypeError('Module bindings must be an object')
@@ -41,33 +87,57 @@ function normalize(bindings) {
   )
 }
 
+/** An immutable dependency graph that can be transformed and compiled. */
 class Module {
+  /** @type {Map<string, Definition<any>>} */
   #bindings
 
+  /** @param {Map<string, Definition<any>>} bindings */
   constructor(bindings) {
     this.#bindings = bindings
     Object.freeze(this)
   }
 
+  /**
+   * @param {string} name
+   * @returns {Definition<any> | undefined}
+   */
   definitionOf(name) {
     return this.#bindings.get(name)
   }
 
+  /** @returns {IterableIterator<string>} */
   keys() {
     return this.#bindings.keys()
   }
 
+  /**
+   * Returns a module where definitions from `other` override definitions from this module.
+   *
+   * @param {Module} other
+   * @returns {Module}
+   */
   merge(other) {
     if (!(other instanceof Module)) throw new TypeError('Can only merge another DI module')
     return new Module(new Map([...this.#bindings, ...other.#bindings]))
   }
 
+  /**
+   * Retains each root and its transitive dependencies.
+   *
+   * @param {readonly string[]} roots
+   * @returns {Module}
+   */
   shake(roots) {
     if (!Array.isArray(roots) || roots.some(root => typeof root !== 'string')) {
       throw new TypeError('Shake roots must be an array of strings')
     }
 
     const retained = new Set()
+    /**
+     * @param {string} name
+     * @param {string | undefined} [requiredBy]
+     */
     const visit = (name, requiredBy) => {
       const binding = this.#bindings.get(name)
       if (!binding) {
@@ -85,10 +155,20 @@ class Module {
     return new Module(new Map([...this.#bindings].filter(([name]) => retained.has(name))))
   }
 
+  /**
+   * Eagerly resolves every binding once. Values, including promises, are never awaited or unwrapped.
+   *
+   * @returns {Readonly<Record<string, any>>}
+   */
   compile() {
     const values = new Map()
     const resolving = []
 
+    /**
+     * @param {string} name
+     * @param {string | undefined} [requiredBy]
+     * @returns {any}
+     */
     const resolve = (name, requiredBy) => {
       if (values.has(name)) return values.get(name)
 
@@ -117,6 +197,7 @@ class Module {
 
     for (const name of this.#bindings.keys()) resolve(name)
 
+    /** @type {Record<string, any>} */
     const container = Object.create(null)
     for (const [name, value] of values) {
       Object.defineProperty(container, name, {
@@ -130,6 +211,10 @@ class Module {
   }
 }
 
+/**
+ * @param {Bindings} bindings
+ * @returns {Module}
+ */
 export function module(bindings) {
   return new Module(normalize(bindings))
 }

@@ -14,6 +14,7 @@ export default {
           'git sparse-checkout set di',
           `git fetch --depth=1 --filter=blob:none origin ${DI_COMMIT}`,
           'git checkout --detach FETCH_HEAD',
+          'rm -f /src/di/dagr.di.test.js /src/di/package.json',
         ].join(' && '),
       },
       { WORKDIR: '/src/di' },

@@ -39,6 +39,7 @@ Each top-level directory contains one independently consumable component. Build 
 - `dagr.stack.js` is the stack's public entry point.
 - Its default export is the stack factory.
 - Everything needed by a stack lives inside its directory.
+- Component directories contain only files consumers may mount; repository tests live in `tests/`.
 - Consumers pin an exact commit and mount only the desired directory.
 - Release tags are scoped by stack, for example `ts-library/v1.2.0`.
 

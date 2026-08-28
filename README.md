@@ -6,6 +6,26 @@ A stack is a self-contained JavaScript factory for a project archetype. It retur
 of dagr facets and targets needed by that archetype, while the consuming repository supplies what
 makes a particular package different.
 
+## Configuration model
+
+Stacks accept project facts and developer intent. The selected target supplies the action, and the
+stack combines those with irreducible external policy to derive tool configuration for that action.
+Generated files are projections, not canonical project truth.
+
+The calculation itself is an explicit DAG. Each node declares whether its value comes from external
+configuration, from the selected target, or from a calculation over named dependency nodes. The
+`ts-library` stack executes that DAG with the shared [`di`](di/) component rather than carrying a
+second graph evaluator.
+
+This means a stack owns consistency between tools. For example, a compiler output directory and a
+package manifest's entry points and file list are one derived agreement, not unrelated consumer
+options. Likewise, publishability comes from selecting a publishing target; it is not a second
+boolean that can contradict the action. A publishing location owns registry visibility and other
+location-specific policy.
+
+See [`ts-library`](ts-library/) for the concrete fact, intent, action, external policy, and derived
+configuration mapping.
+
 ## Convention
 
 Each top-level directory contains one independently consumable component. Build stacks expose:

@@ -1,4 +1,18 @@
-import { calculated, calculationModule, external } from './dagr.graph.js'
+const node = (kind, deps = [], factory) => Object.freeze({
+  kind,
+  deps: Object.freeze([...deps]),
+  ...(factory === undefined ? {} : { factory }),
+})
+
+const external = () => node('external')
+const calculated = (deps, factory) => node('calculated', deps, factory)
+const calculationModule = (name, nodes, contributions = {}) => Object.freeze({
+  name,
+  nodes: Object.freeze({ ...nodes }),
+  contributions: Object.freeze(Object.fromEntries(
+    Object.entries(contributions).map(([kind, names]) => [kind, Object.freeze([...names])]),
+  )),
+})
 
 const freeze = value => Object.freeze(value)
 

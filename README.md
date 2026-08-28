@@ -13,7 +13,9 @@ stack combines those with irreducible external policy to derive tool configurati
 Generated files are projections, not canonical project truth.
 
 The calculation itself is an explicit DAG. Each node declares whether its value comes from external
-configuration, from the selected target, or from a calculation over named dependency nodes.
+configuration, from the selected target, or from a calculation over named dependency nodes. The
+`ts-library` stack executes that DAG with the shared [`di`](di/) component rather than carrying a
+second graph evaluator.
 
 This means a stack owns consistency between tools. For example, a compiler output directory and a
 package manifest's entry points and file list are one derived agreement, not unrelated consumer

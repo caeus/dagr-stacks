@@ -1,4 +1,5 @@
 import bundledVersions from '//dagr.versions.yaml'
+import di from '//di//dagr.di.js'
 import { pnpmfile } from '//dagr.utils.js'
 import {
   TYPESCRIPT_LIBRARY_DAG,
@@ -30,7 +31,7 @@ export default function typescript({
     const localDeps = deps.filter(dependency => 'pkg' in dependency)
     const packTarget = dependency => `${dependency.pkg}:ci:pack`
     const packTargets = localDeps.map(packTarget)
-    const project = typescriptLibraryProjector({
+    const project = typescriptLibraryProjector(di, {
       location,
       scope,
       version,

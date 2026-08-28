@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import di from '../di/dagr.di.js'
 import {
   TYPESCRIPT_LIBRARY_DAG,
-  calculated,
-  calculationGraph,
   typescriptLibraryProjector,
 } from './dagr.projections.js'
 
@@ -17,7 +16,7 @@ const versions = {
 }
 
 function projector(overrides = {}) {
-  return typescriptLibraryProjector({
+  return typescriptLibraryProjector(di, {
     location: '//packages/example',
     scope: 'internal',
     version: '1.2.3',
@@ -47,19 +46,6 @@ describe('TypeScript library projections', () => {
       'files',
       'output',
     ])
-  })
-
-  it('rejects missing source values and circular calculations', () => {
-    assert.throws(
-      () => TYPESCRIPT_LIBRARY_DAG.calculate(),
-      /Missing external calculation node "location"/,
-    )
-
-    const circular = calculationGraph({
-      a: calculated(['b'], value => value),
-      b: calculated(['a'], value => value),
-    })
-    assert.throws(() => circular.calculate(), /Circular calculation: a -> b -> a/)
   })
 
   it('materializes only development and test tooling in the dev projection', () => {

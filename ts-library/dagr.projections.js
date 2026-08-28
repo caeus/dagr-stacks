@@ -1,83 +1,36 @@
-const node = (kind, deps = [], calculate) => Object.freeze({
+const node = (kind, deps = [], factory) => Object.freeze({
   kind,
   deps: Object.freeze([...deps]),
-  ...(calculate === undefined ? {} : { calculate }),
+  ...(factory === undefined ? {} : { factory }),
 })
 
-export const external = () => node('external')
-export const target = () => node('target')
-export const calculated = (deps, calculate) => node('calculated', deps, calculate)
+const external = () => node('external')
+const target = () => node('target')
+const calculated = (deps, factory) => node('calculated', deps, factory)
 
-export function calculationGraph(definitions) {
-  const nodes = Object.freeze(Object.fromEntries(
-    Object.entries(definitions).map(([name, definition]) => {
-      if (!['external', 'target', 'calculated'].includes(definition?.kind)) {
-        throw new TypeError(`Calculation node ${JSON.stringify(name)} has an invalid kind`)
-      }
-      if (definition.kind === 'calculated' && typeof definition.calculate !== 'function') {
-        throw new TypeError(`Calculated node ${JSON.stringify(name)} needs a calculation`)
-      }
-      return [name, node(definition.kind, definition.deps, definition.calculate)]
-    }),
+function compile(graph, di, externalValues, targetValues, roots) {
+  const sourceModule = kind => di.module(Object.fromEntries(
+    Object.entries(graph.nodes)
+      .filter(([, definition]) => definition.kind === kind)
+      .map(([name]) => {
+        const values = kind === 'external' ? externalValues : targetValues
+        if (!Object.hasOwn(values, name)) {
+          throw new Error(`Missing ${kind} calculation node ${JSON.stringify(name)}`)
+        }
+        return [name, di.toValue(values[name])]
+      }),
+  ))
+  const calculations = di.module(Object.fromEntries(
+    Object.entries(graph.nodes)
+      .filter(([, definition]) => definition.kind === 'calculated')
+      .map(([name, definition]) => [name, di.toFun(definition.deps, definition.factory)]),
   ))
 
-  for (const [name, definition] of Object.entries(nodes)) {
-    for (const dependency of definition.deps) {
-      if (!(dependency in nodes)) {
-        throw new Error(`Missing calculation node ${JSON.stringify(dependency)} required by ${JSON.stringify(name)}`)
-      }
-    }
-  }
-
-  return Object.freeze({
-    nodes,
-    calculate({ external: externalValues = {}, targets: targetValues = {} } = {}) {
-      const values = new Map()
-      const resolving = []
-
-      const resolve = (name, requiredBy) => {
-        if (values.has(name)) return values.get(name)
-
-        const definition = nodes[name]
-        if (!definition) {
-          const suffix = requiredBy === undefined ? '' : ` required by ${JSON.stringify(requiredBy)}`
-          throw new Error(`Missing calculation node ${JSON.stringify(name)}${suffix}`)
-        }
-
-        const cycleAt = resolving.indexOf(name)
-        if (cycleAt !== -1) {
-          throw new Error(`Circular calculation: ${[...resolving.slice(cycleAt), name].join(' -> ')}`)
-        }
-
-        let value
-        if (definition.kind === 'external') {
-          if (!Object.hasOwn(externalValues, name)) {
-            throw new Error(`Missing external calculation node ${JSON.stringify(name)}`)
-          }
-          value = externalValues[name]
-        } else if (definition.kind === 'target') {
-          if (!Object.hasOwn(targetValues, name)) {
-            throw new Error(`Missing target calculation node ${JSON.stringify(name)}`)
-          }
-          value = targetValues[name]
-        } else {
-          resolving.push(name)
-          try {
-            value = definition.calculate(...definition.deps.map(dependency => resolve(dependency, name)))
-          } finally {
-            resolving.pop()
-          }
-        }
-
-        values.set(name, value)
-        return value
-      }
-
-      const result = Object.create(null)
-      for (const name of Object.keys(nodes)) result[name] = resolve(name)
-      return Object.freeze(result)
-    },
-  })
+  return sourceModule('external')
+    .merge(sourceModule('target'))
+    .merge(calculations)
+    .shake(roots)
+    .compile()
 }
 
 export function projectName(location, scope) {
@@ -192,7 +145,7 @@ const toolDependencyEntries = (name, action, toolDependencies, versions) =>
     return [pkg, versions[pkg]]
   })
 
-export const TYPESCRIPT_LIBRARY_DAG = calculationGraph({
+export const TYPESCRIPT_LIBRARY_DAG = Object.freeze({ nodes: Object.freeze({
   // Values originating outside this calculation graph.
   location: external(),
   scope: external(),
@@ -366,9 +319,9 @@ export const TYPESCRIPT_LIBRARY_DAG = calculationGraph({
       output,
     }),
   ),
-})
+}) })
 
-export function typescriptLibraryProjector({
+export function typescriptLibraryProjector(di, {
   location,
   scope,
   version,
@@ -388,8 +341,11 @@ export function typescriptLibraryProjector({
     testEnvironment,
   }
 
-  return selectedTarget => TYPESCRIPT_LIBRARY_DAG.calculate({
-    external: externalValues,
-    targets: { target: selectedTarget },
-  }).projection
+  return selectedTarget => compile(
+    TYPESCRIPT_LIBRARY_DAG,
+    di,
+    externalValues,
+    { target: selectedTarget },
+    ['projection'],
+  ).projection
 }

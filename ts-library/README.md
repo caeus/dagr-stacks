@@ -55,11 +55,10 @@ independently configurable.
 
 ## Calculation DAG
 
-[`dagr.projections.js`](dagr.projections.js) declares every node and incoming edge as data using
-three constructors:
+[`dagr.projections.js`](dagr.projections.js) declares every node and incoming edge as data:
 
 ```js
-export const TYPESCRIPT_LIBRARY_DAG = calculationGraph({
+export const TYPESCRIPT_LIBRARY_DAG = { nodes: {
   location: external(),
   scope: external(),
   versions: external(),
@@ -97,12 +96,29 @@ export const TYPESCRIPT_LIBRARY_DAG = calculationGraph({
     'files',
     'output',
   ], calculateProjection),
-})
+} }
 ```
 
 The actual declaration contains the complete dependency lists rather than the abbreviated lists
-above. The evaluator rejects missing source values, missing dependency nodes, and cycles. Tests
-assert the source kinds and important edges so provenance cannot drift back into implicit code.
+above. Tests assert the source kinds and important edges so provenance cannot drift back into
+implicit code.
+
+The graph does not implement its own evaluator. The stack mounts the [`di`](../di/) component at
+the exact merge commit from PR #2. External and target nodes become `toValue` bindings; calculated
+nodes become `toFun(deps, factory)` bindings. The three binding modules are merged, shaken to the
+`projection` root, and compiled by DI:
+
+```js
+externalModule
+  .merge(targetModule)
+  .merge(calculatedModule)
+  .shake(['projection'])
+  .compile()
+```
+
+DI remains responsible for dependency resolution, missing bindings, cycles, immutability, and
+single evaluation. The projection layer only adds node provenance and TypeScript-library
+calculations.
 
 `action` is calculated from the selected target. Callers cannot independently request a publish
 action for `ci:pack`, which is the contradiction that a separate `private` input used to permit.
@@ -176,6 +192,9 @@ reaching into raw package or TypeScript configuration.
 - `testEnvironment`: meaningful test-runtime intent. Defaults to `node`.
 - `transform(index, context)`: composition hook. Its context contains `project(target)` and the
   calculation graph.
+
+The stack is still independently mountable. Its `di/` namespace slot is a nested sparse mount
+pinned to the DI merge commit, so consumers do not need to mount the sibling component themselves.
 
 The returned stack accepts package facts and intent:
 

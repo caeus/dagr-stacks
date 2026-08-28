@@ -5,7 +5,7 @@ import di from '../di/dagr.di.js'
 import {
   TYPESCRIPT_LIBRARY_DAG,
   typescriptLibraryProjector,
-} from './dagr.projections.js'
+} from '../ts-library/dagr.projections.js'
 
 const versions = {
   '@tsconfig/strictest': '2.0.8',

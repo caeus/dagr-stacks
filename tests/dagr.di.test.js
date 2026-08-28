@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import di, { toClass, toFun, toValue } from './dagr.di.js'
+import di, { toClass, toFun, toValue } from '../di/dagr.di.js'
 
 describe('di', () => {
   it('compiles every binding eagerly and once', () => {

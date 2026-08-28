@@ -56,8 +56,12 @@ export function library({
   const intent = { runtime, language, sourceMaps, assets: [...assets] }
   const module = calculationModule('library', {
     libraryIntent: external(),
-    libraryToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
-      hasAction(actions, action) ? ['@tsconfig/strictest', 'typescript'] : []),
+    libraryToolPackages: calculated(
+      ['action', 'developmentActions', 'libraryIntent'],
+      (action, actions, options) => hasAction(actions, action)
+        ? ['@tsconfig/strictest', ...(options.runtime === 'node' ? ['@types/node'] : []), 'typescript']
+        : [],
+    ),
     libraryPackageFields: calculated(
       ['action', 'distributionActions', 'sourceImport', 'outputImport', 'outputTypes', 'outputDirectory'],
       (action, actions, sourceImport, outputImport, outputTypes, outputDirectory) => {
@@ -90,6 +94,7 @@ export function library({
             lib: [options.language],
             module: node ? 'NodeNext' : 'ESNext',
             moduleResolution: node ? 'NodeNext' : 'Bundler',
+            ...(node ? { types: ['node'] } : {}),
             ...(options.sourceMaps ? { sourceMap: true, inlineSources: true } : {}),
             ...(emit
               ? { outDir: outputDirectory, declaration: true, noEmit: false }
@@ -298,6 +303,8 @@ export default [
     plugins: { '@typescript-eslint': plugin${options.prettier ? ', prettier' : ''} },
     rules: {
       ...plugin.configs.recommended.rules,
+      'no-undef': 'off',
+      'no-redeclare': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/no-unused-vars': 'error',
       ${options.explicitReturnTypes ? "'@typescript-eslint/explicit-function-return-type': 'error'," : ''}

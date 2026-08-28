@@ -94,7 +94,11 @@ describe('composable TypeScript projections', () => {
 
     assert.equal(dev.tsconfig.compilerOptions.module, 'NodeNext')
     assert.equal(dev.tsconfig.compilerOptions.noEmit, true)
-    assert.deepEqual(dev.tsconfig.compilerOptions.types, ['vitest/globals'])
+    assert.deepEqual(dev.tsconfig.compilerOptions.types, ['node', 'vitest/globals'])
+    assert.deepEqual(project('ci:typecheck').tsconfig.exclude, [
+      'src/**/*.test.ts',
+      'src/**/*.spec.ts',
+    ])
     assert.equal(dev.files['.prettierrc.json'].semi, true)
     assert.match(dev.files['vitest.config.ts'], /typecheck: \{ enabled: true \}/)
     assert.deepEqual(build.buildAssets, ['README.md', 'LICENSE'])

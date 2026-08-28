@@ -96,7 +96,7 @@ const POLICY = Object.freeze({
   eslintActions: Object.freeze(['dev', 'lint']),
   typedocActions: Object.freeze(['dev', 'docs']),
   viteActions: Object.freeze(['dev', 'test', 'build']),
-  testSourceActions: Object.freeze(['dev', 'typecheck', 'test', 'lint']),
+  testSourceActions: Object.freeze(['dev', 'test', 'lint']),
   devAction: 'dev',
   publishAction: 'publish',
   dependencyLocations: Object.freeze(['prod', 'dev']),

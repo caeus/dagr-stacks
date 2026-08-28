@@ -88,6 +88,7 @@ describe('composable TypeScript projections', () => {
     ])
     const dev = project('dev:sync')
     const build = project('ci:build')
+    const docs = project('ci:docs')
     const pack = project('ci:pack')
     const publish = project('publish:pack')
 
@@ -97,6 +98,7 @@ describe('composable TypeScript projections', () => {
     assert.equal(dev.files['.prettierrc.json'].semi, true)
     assert.match(dev.files['vitest.config.ts'], /typecheck: \{ enabled: true \}/)
     assert.deepEqual(build.buildAssets, ['README.md', 'LICENSE'])
+    assert.deepEqual(docs.tsconfig.exclude, ['src/**/*.test.ts', 'src/**/*.spec.ts'])
     assert.equal(build.tsconfig.compilerOptions.noEmit, false)
     assert.equal(build.tsconfig.compilerOptions.sourceMap, true)
     assert.equal(pack.packageJson.private, true)

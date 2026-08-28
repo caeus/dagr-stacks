@@ -73,14 +73,17 @@ export function library({
       },
     ),
     libraryTsconfig: calculated(
-      ['action', 'emitActions', 'libraryIntent', 'sourceDirectory', 'outputDirectory'],
-      (action, actions, options, sourceDirectory, outputDirectory) => {
-        const emit = hasAction(actions, action)
+      ['action', 'emitActions', 'testSourceActions', 'libraryIntent', 'sourceDirectory', 'outputDirectory'],
+      (action, emitActions, testSourceActions, options, sourceDirectory, outputDirectory) => {
+        const emit = hasAction(emitActions, action)
+        const includeTests = hasAction(testSourceActions, action)
         const node = options.runtime === 'node'
         return {
           extends: '@tsconfig/strictest/tsconfig.json',
           include: [`${sourceDirectory}/**/*.ts`],
-          ...(emit ? { exclude: [`${sourceDirectory}/**/*.test.ts`, `${sourceDirectory}/**/*.spec.ts`] } : {}),
+          ...(!includeTests
+            ? { exclude: [`${sourceDirectory}/**/*.test.ts`, `${sourceDirectory}/**/*.spec.ts`] }
+            : {}),
           compilerOptions: {
             rootDir: sourceDirectory,
             target: options.language,

@@ -1,5 +1,9 @@
 import bundledVersions from '//dagr.versions.yaml'
-import { pnpmfile, projectName, typescriptLibraryProjector } from '//dagr.utils.js'
+import { pnpmfile } from '//dagr.utils.js'
+import {
+  TYPESCRIPT_LIBRARY_DAG,
+  typescriptLibraryProjector,
+} from '//dagr.projections.js'
 import { writeJson, writeText } from '//dagr.file_utils.js'
 import { RECOMMENDED_IGNORE } from '//dagr.dockerignore.js'
 
@@ -23,13 +27,11 @@ export default function typescript({
     deps = [],
     metadata = {},
   }) {
-    const name = projectName(location, scope)
-    const slug = name.slice(name.indexOf('/') + 1)
     const localDeps = deps.filter(dependency => 'pkg' in dependency)
     const packTarget = dependency => `${dependency.pkg}:ci:pack`
     const packTargets = localDeps.map(packTarget)
     const project = typescriptLibraryProjector({
-      name,
+      location,
       scope,
       version,
       deps,
@@ -37,9 +39,10 @@ export default function typescript({
       versions,
       testEnvironment,
     })
+    const { name, slug } = project('dev:sync')
 
-    const configuration = action => {
-      const projection = project(action)
+    const configuration = target => {
+      const projection = project(target)
       return {
         deps: [base],
         run: ({ images: images }) => ({
@@ -69,7 +72,7 @@ export default function typescript({
       }),
     })
 
-    const pack = action => ({
+    const pack = target => ({
       deps: ['ci:build', ...packTargets],
       run: ({ images: images }) => ({
         FROM: images['ci:build'],
@@ -80,20 +83,20 @@ export default function typescript({
           { WORKDIR: '/repo' },
           // The distribution manifest replaces the build manifest immediately before packing.
           // `pack` remains private for local dependency artifacts; `publish` is publishable.
-          writeJson('/repo/package.json', project(action).packageJson),
+          writeJson('/repo/package.json', project(target).packageJson),
           { RUN: `mkdir -p /tmp/pack /out && pnpm pack --pack-destination /tmp/pack && mv /tmp/pack/*.tgz /out/${slug}.tgz` },
         ],
         IGNORE: ignore,
       }),
     })
 
-    const dev = project('dev')
+    const dev = project('dev:sync')
     const index = {
       config: {
-        dev: configuration('dev'),
-        typecheck: configuration('typecheck'),
-        test: configuration('test'),
-        build: configuration('build'),
+        dev: configuration('config:dev'),
+        typecheck: configuration('config:typecheck'),
+        test: configuration('config:test'),
+        build: configuration('config:build'),
       },
       dev: {
         sync: {
@@ -146,15 +149,21 @@ export default function typescript({
             IGNORE: ignore,
           }),
         },
-        pack: pack('pack'),
+        pack: pack('ci:pack'),
       },
       publish: {
         // This target creates a publishable artifact. The registry/location adapter performs the
         // actual publish and owns visibility, authentication, provenance, and tags.
-        pack: pack('publish'),
+        pack: pack('publish:pack'),
       },
     }
 
-    return transform(index, { location, name, slug, project })
+    return transform(index, {
+      location,
+      name,
+      slug,
+      project,
+      calculations: TYPESCRIPT_LIBRARY_DAG,
+    })
   }
 }

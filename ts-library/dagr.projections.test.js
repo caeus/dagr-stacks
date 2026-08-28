@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { typescriptLibraryProjector } from './dagr.utils.js'
+import {
+  TYPESCRIPT_LIBRARY_DAG,
+  calculated,
+  calculationGraph,
+  typescriptLibraryProjector,
+} from './dagr.projections.js'
 
 const versions = {
   '@tsconfig/strictest': '2.0.8',
@@ -13,7 +18,7 @@ const versions = {
 
 function projector(overrides = {}) {
   return typescriptLibraryProjector({
-    name: '@internal/example',
+    location: '//packages/example',
     scope: 'internal',
     version: '1.2.3',
     deps: [{ npm: 'zod', at: 'prod' }],
@@ -24,9 +29,44 @@ function projector(overrides = {}) {
 }
 
 describe('TypeScript library projections', () => {
-  it('materializes only development and test tooling in the dev projection', () => {
-    const dev = projector()('dev')
+  it('expresses source provenance and every calculation edge as data', () => {
+    const nodes = TYPESCRIPT_LIBRARY_DAG.nodes
 
+    assert.equal(nodes.location.kind, 'external')
+    assert.equal(nodes.target.kind, 'target')
+    assert.equal(nodes.packageJson.kind, 'calculated')
+    assert.deepEqual(nodes.action.deps, ['target', 'targetActions'])
+    assert.deepEqual(nodes.outputImport.deps, ['outputDirectory', 'outputStem'])
+    assert.deepEqual(nodes.projection.deps, [
+      'target',
+      'action',
+      'name',
+      'slug',
+      'packageJson',
+      'tsconfig',
+      'files',
+      'output',
+    ])
+  })
+
+  it('rejects missing source values and circular calculations', () => {
+    assert.throws(
+      () => TYPESCRIPT_LIBRARY_DAG.calculate(),
+      /Missing external calculation node "location"/,
+    )
+
+    const circular = calculationGraph({
+      a: calculated(['b'], value => value),
+      b: calculated(['a'], value => value),
+    })
+    assert.throws(() => circular.calculate(), /Circular calculation: a -> b -> a/)
+  })
+
+  it('materializes only development and test tooling in the dev projection', () => {
+    const dev = projector()('dev:sync')
+
+    assert.equal(dev.target, 'dev:sync')
+    assert.equal(dev.action, 'dev')
     assert.equal(dev.packageJson.private, true)
     assert.equal(dev.packageJson.main, './src/index.ts')
     assert.equal(dev.packageJson.devDependencies.vitest, '3.2.7')
@@ -41,9 +81,9 @@ describe('TypeScript library projections', () => {
 
   it('keeps CI projections independent even when some values currently agree', () => {
     const project = projector()
-    const typecheck = project('typecheck')
-    const test = project('test')
-    const build = project('build')
+    const typecheck = project('ci:typecheck')
+    const test = project('ci:test')
+    const build = project('ci:build')
 
     assert.equal(typecheck.tsconfig.compilerOptions.noEmit, true)
     assert.equal(typecheck.packageJson.devDependencies.prettier, undefined)
@@ -61,8 +101,8 @@ describe('TypeScript library projections', () => {
 
   it('derives one output agreement for the compiler and package artifacts', () => {
     const project = projector()
-    const build = project('build')
-    const pack = project('pack')
+    const build = project('ci:build')
+    const pack = project('ci:pack')
 
     assert.equal(build.tsconfig.compilerOptions.outDir, pack.output.directory)
     assert.deepEqual(pack.packageJson.files, [pack.output.directory])
@@ -75,8 +115,8 @@ describe('TypeScript library projections', () => {
 
   it('derives publishability from the selected action', () => {
     const project = projector()
-    const pack = project('pack').packageJson
-    const publish = project('publish').packageJson
+    const pack = project('ci:pack').packageJson
+    const publish = project('publish:pack').packageJson
 
     assert.equal(pack.private, true)
     assert.equal(publish.private, false)
@@ -87,18 +127,18 @@ describe('TypeScript library projections', () => {
 
   it('rejects package metadata that tries to override derived values', () => {
     assert.throws(
-      () => projector({ metadata: { private: false, files: ['whatever'] } }),
+      () => projector({ metadata: { private: false, files: ['whatever'] } })('dev:sync'),
       /package metadata cannot configure non-metadata fields private, files/,
     )
   })
 
-  it('rejects an action the stack cannot map', () => {
-    assert.throws(() => projector()('deploy'), /unknown TypeScript library action "deploy"/)
+  it('rejects a target the stack cannot map', () => {
+    assert.throws(() => projector()('deploy'), /Unknown TypeScript library target "deploy"/)
   })
 
   it('rejects dependencies whose versions are not repository input', () => {
     assert.throws(
-      () => projector({ deps: [{ npm: 'missing', at: 'prod' }] })('dev'),
+      () => projector({ deps: [{ npm: 'missing', at: 'prod' }] })('dev:sync'),
       /no version configured for npm dependency missing/,
     )
   })

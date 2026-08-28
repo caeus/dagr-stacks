@@ -12,6 +12,9 @@ Stacks accept project facts and developer intent. The selected target supplies t
 stack combines those with irreducible external policy to derive tool configuration for that action.
 Generated files are projections, not canonical project truth.
 
+The calculation itself is an explicit DAG. Each node declares whether its value comes from external
+configuration, from the selected target, or from a calculation over named dependency nodes.
+
 This means a stack owns consistency between tools. For example, a compiler output directory and a
 package manifest's entry points and file list are one derived agreement, not unrelated consumer
 options. Likewise, publishability comes from selecting a publishing target; it is not a second

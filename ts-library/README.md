@@ -41,18 +41,71 @@ export default stack({
 ## Configuration model
 
 There is deliberately no canonical generated `package.json`, `tsconfig.json`, or Vitest config.
-Each is a projection for one action.
+Each is a terminal value in an explicit calculation DAG.
 
-| Kind | Meaning | TypeScript stack examples |
+| Node kind | Supplied by | TypeScript stack examples |
 | --- | --- | --- |
-| Fact | Information true independently of an action | logical location, version, declared dependencies, description |
-| Intent | A choice the developer actually cares about | TypeScript library, test environment, production vs development dependency |
-| Action | What is happening now | develop, typecheck, test, build, pack, publish |
-| External policy | Information the stack cannot infer | base image target, package scope, dependency versions, registry location |
-| Derived | Tool plumbing required to carry out the action | `private`, `rootDir`, `outDir`, `noEmit`, `main`, `types`, `exports`, `files` |
+| `external` | repository/package declaration or stack policy | location, dependency versions, test intent, source convention |
+| `target` | the dagr target requesting the projection | `dev:sync`, `ci:build`, `publish:pack` |
+| `calculated` | named dependencies in this graph | action, package name, `private`, `outDir`, `exports`, generated files |
 
-The rule is: if facts, intent, action, and external policy determine a value, that value is derived.
-It must not also be independently configurable.
+Facts, intent, and irreducible policy enter through external nodes. The target enters through a
+target node. Everything determined by those sources is a calculated node and must not also be
+independently configurable.
+
+## Calculation DAG
+
+[`dagr.projections.js`](dagr.projections.js) declares every node and incoming edge as data using
+three constructors:
+
+```js
+export const TYPESCRIPT_LIBRARY_DAG = calculationGraph({
+  location: external(),
+  scope: external(),
+  versions: external(),
+  targetActions: external(),
+
+  target: target(),
+
+  action: calculated(['target', 'targetActions'], calculateAction),
+  name: calculated(['location', 'scope'], calculateName),
+  publishable: calculated(['action', 'publishAction'], calculatePublishability),
+  outputImport: calculated(['outputDirectory', 'outputStem'], calculateOutputImport),
+  packageJson: calculated([
+    'name',
+    'publishable',
+    'outputImport',
+    // ...every other direct input
+  ], calculatePackageJson),
+  tsconfig: calculated([
+    'typescriptPolicy',
+    'sourceDirectory',
+    'outputDirectory',
+    'emit',
+  ], calculateTsconfig),
+  files: calculated([
+    'packageJson',
+    'tsconfig',
+    'vitestConfig',
+    'prettierConfig',
+  ], calculateFiles),
+  projection: calculated([
+    'target',
+    'action',
+    'packageJson',
+    'tsconfig',
+    'files',
+    'output',
+  ], calculateProjection),
+})
+```
+
+The actual declaration contains the complete dependency lists rather than the abbreviated lists
+above. The evaluator rejects missing source values, missing dependency nodes, and cycles. Tests
+assert the source kinds and important edges so provenance cannot drift back into implicit code.
+
+`action` is calculated from the selected target. Callers cannot independently request a publish
+action for `ci:pack`, which is the contradiction that a separate `private` input used to permit.
 
 That has some important consequences:
 
@@ -87,8 +140,9 @@ checked into the repository.
 a publishable tarball but does not choose or contact a registry. The adapter for the selected
 publishing location owns that operation and its visibility policy.
 
-The stack passes `project(action)` to `transform(index, context)` so repository composition can add
-new targets without reaching into raw package or TypeScript configuration.
+The stack passes `project(target)` and the inspectable `calculations` graph to
+`transform(index, context)` so repository composition can reuse a known target projection without
+reaching into raw package or TypeScript configuration.
 
 ## Generated-unit mapping
 
@@ -120,7 +174,8 @@ new targets without reaching into raw package or TypeScript configuration.
 - `versions`: npm package version map.
 - `ignore`: repository-specific dagr build-context exclusions.
 - `testEnvironment`: meaningful test-runtime intent. Defaults to `node`.
-- `transform(index, context)`: composition hook. Its context contains `project(action)`.
+- `transform(index, context)`: composition hook. Its context contains `project(target)` and the
+  calculation graph.
 
 The returned stack accepts package facts and intent:
 

@@ -14,35 +14,15 @@ const calculationModule = (name, nodes, contributions = {}) => Object.freeze({
   )),
 })
 
-const freeze = value => Object.freeze(value)
-
-const feature = (name, role, intent, module, execution = {}) => {
-  const frozenIntent = freeze({ ...intent })
-  const externalValues = Object.fromEntries(
-    Object.entries(module.nodes)
-      .filter(([, definition]) => definition.kind === 'external')
-      .map(([nodeName]) => [nodeName, frozenIntent]),
-  )
-  return freeze({
-    name,
-    role,
-    intent: frozenIntent,
-    externalValues: freeze(externalValues),
-    module,
-    execution: freeze({ ...execution }),
-  })
-}
+const feature = (name, role, externalValues, module, execution = {}) => Object.freeze({
+  name,
+  role,
+  externalValues: Object.freeze({ ...externalValues }),
+  module,
+  execution: Object.freeze({ ...execution }),
+})
 
 const hasAction = (actions, action) => actions.includes(action)
-
-const prettierDefaults = freeze({
-  $schema: 'https://json.schemastore.org/prettierrc',
-  semi: false,
-  tabWidth: 2,
-  singleQuote: true,
-  printWidth: 100,
-  trailingComma: 'none',
-})
 
 export function library({
   runtime = 'portable',
@@ -53,70 +33,43 @@ export function library({
   if (!['portable', 'node'].includes(runtime)) {
     throw new Error(`library runtime must be portable or node, got ${JSON.stringify(runtime)}`)
   }
-  const intent = { runtime, language, sourceMaps, assets: [...assets] }
+  const externalValues = {
+    productKind: 'library',
+    runtimeKind: runtime,
+    languageTarget: language,
+    sourceMapIntent: sourceMaps,
+    buildAssetInputs: Object.freeze([...assets]),
+  }
   const module = calculationModule('library', {
-    libraryIntent: external(),
-    libraryToolPackages: calculated(
-      ['action', 'developmentActions', 'libraryIntent'],
-      (action, actions, options) => hasAction(actions, action)
-        ? ['@tsconfig/strictest', ...(options.runtime === 'node' ? ['@types/node'] : []), 'typescript']
+    productKind: external(),
+    runtimeKind: external(),
+    languageTarget: external(),
+    sourceMapIntent: external(),
+    buildAssetInputs: external(),
+    moduleKind: calculated(['runtimeKind'], runtime => runtime === 'node' ? 'NodeNext' : 'ESNext'),
+    moduleResolutionKind: calculated(
+      ['runtimeKind'],
+      runtime => runtime === 'node' ? 'NodeNext' : 'Bundler',
+    ),
+    standardLibraries: calculated(['languageTarget'], target => [target]),
+    baseAmbientTypes: calculated(['runtimeKind'], runtime => runtime === 'node' ? ['node'] : []),
+    sourceAlias: calculated([], () => undefined),
+    archetypeToolPackages: calculated(
+      ['action', 'developmentActions', 'runtimeKind'],
+      (action, actions, runtime) => hasAction(actions, action)
+        ? ['@tsconfig/strictest', ...(runtime === 'node' ? ['@types/node'] : []), 'typescript']
         : [],
     ),
-    libraryPackageFields: calculated(
-      ['action', 'distributionActions', 'sourceImport', 'outputImport', 'outputTypes', 'outputDirectory'],
-      (action, actions, sourceImport, outputImport, outputTypes, outputDirectory) => {
-        const distribution = hasAction(actions, action)
-        const importPath = distribution ? outputImport : sourceImport
-        const typesPath = distribution ? outputTypes : sourceImport
-        return {
-          main: importPath,
-          types: typesPath,
-          exports: { '.': { types: typesPath, import: importPath } },
-          ...(distribution ? { files: [outputDirectory] } : {}),
-        }
-      },
-    ),
-    libraryTsconfig: calculated(
-      ['action', 'emitActions', 'testSourceActions', 'libraryIntent', 'sourceDirectory', 'outputDirectory'],
-      (action, emitActions, testSourceActions, options, sourceDirectory, outputDirectory) => {
-        const emit = hasAction(emitActions, action)
-        const includeTests = hasAction(testSourceActions, action)
-        const node = options.runtime === 'node'
-        return {
-          extends: '@tsconfig/strictest/tsconfig.json',
-          include: [`${sourceDirectory}/**/*.ts`],
-          ...(!includeTests
-            ? { exclude: [`${sourceDirectory}/**/*.test.ts`, `${sourceDirectory}/**/*.spec.ts`] }
-            : {}),
-          compilerOptions: {
-            rootDir: sourceDirectory,
-            target: options.language,
-            lib: [options.language],
-            module: node ? 'NodeNext' : 'ESNext',
-            moduleResolution: node ? 'NodeNext' : 'Bundler',
-            ...(node ? { types: ['node'] } : {}),
-            ...(options.sourceMaps ? { sourceMap: true, inlineSources: true } : {}),
-            ...(emit
-              ? { outDir: outputDirectory, declaration: true, noEmit: false }
-              : { noEmit: true }),
-          },
-        }
-      },
-    ),
-    libraryOutput: calculated(
-      ['outputDirectory', 'outputImport', 'outputTypes'],
-      (directory, importPath, types) => ({ directory, import: importPath, types }),
-    ),
-    libraryBuildAssets: calculated(['libraryIntent'], options => options.assets),
+    archetypeRuntimePackages: calculated([], () => []),
+    archetypeAllowBuilds: calculated([], () => []),
+    buildAssets: calculated(['buildAssetInputs'], assets => assets),
   }, {
-    toolPackages: ['libraryToolPackages'],
-    packageFields: ['libraryPackageFields'],
-    tsconfig: ['libraryTsconfig'],
-    output: ['libraryOutput'],
-    buildAssets: ['libraryBuildAssets'],
+    toolPackages: ['archetypeToolPackages'],
+    runtimePackages: ['archetypeRuntimePackages'],
+    ambientTypes: ['baseAmbientTypes'],
+    allowBuilds: ['archetypeAllowBuilds'],
   })
-
-  return feature('library', 'archetype', intent, module, {
+  return feature('library', 'archetype', externalValues, module, {
     typecheck: true,
     build: 'tsc',
     pack: true,
@@ -124,40 +77,44 @@ export function library({
 }
 
 export function cloudflareWorker({ language = 'ES2022' } = {}) {
-  const intent = { language }
+  const externalValues = {
+    productKind: 'worker',
+    runtimeKind: 'cloudflare-worker',
+    languageTarget: language,
+    sourceMapIntent: false,
+    buildAssetInputs: Object.freeze([]),
+  }
   const module = calculationModule('cloudflare-worker', {
-    workerIntent: external(),
-    workerToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
+    productKind: external(),
+    runtimeKind: external(),
+    languageTarget: external(),
+    sourceMapIntent: external(),
+    buildAssetInputs: external(),
+    moduleKind: calculated([], () => 'NodeNext'),
+    moduleResolutionKind: calculated([], () => 'NodeNext'),
+    standardLibraries: calculated(['languageTarget'], target => [target]),
+    baseAmbientTypes: calculated([], () => ['@cloudflare/workers-types']),
+    sourceAlias: calculated(
+      ['sourceDirectory'],
+      directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
+    ),
+    archetypeToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
       hasAction(actions, action)
         ? ['@tsconfig/strictest', '@cloudflare/workers-types', 'typescript', 'wrangler']
         : []),
-    workerPackageFields: calculated([], () => ({ imports: { '#*': './src/*' } })),
-    workerTsconfig: calculated(['workerIntent', 'sourceDirectory'], (options, sourceDirectory) => ({
-      extends: '@tsconfig/strictest/tsconfig.json',
-      include: [`${sourceDirectory}/**/*`],
-      compilerOptions: {
-        rootDir: sourceDirectory,
-        target: options.language,
-        lib: [options.language],
-        module: 'NodeNext',
-        moduleResolution: 'NodeNext',
-        noEmit: true,
-        types: ['@cloudflare/workers-types'],
-        paths: { '#*': [`./${sourceDirectory}/*`] },
-      },
-    })),
-    workerAllowBuilds: calculated([], () => ['sharp', 'workerd']),
+    archetypeRuntimePackages: calculated([], () => []),
+    archetypeAllowBuilds: calculated([], () => ['sharp', 'workerd']),
+    buildAssets: calculated(['buildAssetInputs'], assets => assets),
   }, {
-    toolPackages: ['workerToolPackages'],
-    packageFields: ['workerPackageFields'],
-    tsconfig: ['workerTsconfig'],
-    allowBuilds: ['workerAllowBuilds'],
+    toolPackages: ['archetypeToolPackages'],
+    runtimePackages: ['archetypeRuntimePackages'],
+    ambientTypes: ['baseAmbientTypes'],
+    allowBuilds: ['archetypeAllowBuilds'],
   })
-
-  return feature('cloudflare-worker', 'archetype', intent, module, { typecheck: true })
+  return feature('cloudflare-worker', 'archetype', externalValues, module, { typecheck: true })
 }
 
-const viteDependencies = freeze([
+const viteRuntimePackages = Object.freeze([
   '@tailwindcss/vite',
   '@vitejs/plugin-react',
   'class-variance-authority',
@@ -169,150 +126,293 @@ const viteDependencies = freeze([
   'tailwindcss',
 ])
 
-const viteConfig = `import { fileURLToPath, URL } from 'node:url'
+export function viteReact({ language = 'ES2020' } = {}) {
+  const externalValues = {
+    productKind: 'web',
+    runtimeKind: 'browser',
+    languageTarget: language,
+    sourceMapIntent: false,
+    buildAssetInputs: Object.freeze(['index.html', 'public']),
+  }
+  const module = calculationModule('vite-react', {
+    productKind: external(),
+    runtimeKind: external(),
+    languageTarget: external(),
+    sourceMapIntent: external(),
+    buildAssetInputs: external(),
+    moduleKind: calculated([], () => 'ESNext'),
+    moduleResolutionKind: calculated([], () => 'Bundler'),
+    standardLibraries: calculated(['languageTarget'], target => [target, 'DOM', 'DOM.Iterable']),
+    baseAmbientTypes: calculated([], () => []),
+    sourceAlias: calculated(
+      ['sourceDirectory'],
+      directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
+    ),
+    archetypeToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
+      hasAction(actions, action)
+        ? ['@tsconfig/strictest', '@types/node', '@types/react', '@types/react-dom', 'typescript', 'vite']
+        : []),
+    archetypeRuntimePackages: calculated([], () => viteRuntimePackages),
+    archetypeAllowBuilds: calculated([], () => ['esbuild']),
+    buildAssets: calculated(['buildAssetInputs'], assets => assets),
+    'vite.plugins': calculated([], () => ['react', 'tailwindcss']),
+    'vite.resolve.alias': calculated(
+      ['sourceAlias', 'sourceDirectory'],
+      (alias, directory) => ({ [alias.viteName]: `./${directory}` }),
+    ),
+    viteConfig: calculated(
+      ['action', 'viteActions', 'vite.plugins', 'vite.resolve.alias'],
+      (action, actions, plugins, alias) => hasAction(actions, action)
+        ? `import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  resolve: { alias: { '#': fileURLToPath(new URL('./src', import.meta.url)) } },
+  plugins: [${plugins.map(plugin => `${plugin}()`).join(', ')}],
+  resolve: { alias: { '#': fileURLToPath(new URL(${JSON.stringify(alias['#'])}, import.meta.url)) } },
 })
 `
-
-export function viteReact({ language = 'ES2020' } = {}) {
-  const intent = { language }
-  const module = calculationModule('vite-react', {
-    viteReactIntent: external(),
-    viteToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
-      hasAction(actions, action)
-        ? ['@tsconfig/strictest', '@types/node', '@types/react', '@types/react-dom', 'typescript', 'vite']
-        : []),
-    viteRuntimePackages: calculated([], () => viteDependencies),
-    vitePackageFields: calculated([], () => ({ imports: { '#*': './src/*' } })),
-    viteTsconfig: calculated(['viteReactIntent', 'sourceDirectory'], (options, sourceDirectory) => ({
-      extends: '@tsconfig/strictest/tsconfig.json',
-      include: [`${sourceDirectory}/**/*`],
-      compilerOptions: {
-        rootDir: sourceDirectory,
-        target: options.language,
-        lib: [options.language, 'DOM', 'DOM.Iterable'],
-        module: 'ESNext',
-        moduleResolution: 'Bundler',
-        noEmit: true,
-        allowImportingTsExtensions: true,
-        moduleDetection: 'force',
-        jsx: 'react-jsx',
-        paths: { '#*': [`./${sourceDirectory}/*`] },
-      },
-    })),
-    viteFiles: calculated(['action', 'viteActions'], (action, actions) =>
-      hasAction(actions, action) ? { 'vite.config.ts': viteConfig } : {}),
-    viteAllowBuilds: calculated([], () => ['esbuild']),
-    viteOutput: calculated(['outputDirectory'], directory => ({ directory })),
-    viteBuildAssets: calculated([], () => ['index.html', 'public']),
+        : undefined,
+    ),
+    viteGeneratedFiles: calculated(
+      ['viteConfig'],
+      config => config === undefined ? {} : { 'vite.config.ts': config },
+    ),
   }, {
-    toolPackages: ['viteToolPackages'],
-    runtimePackages: ['viteRuntimePackages'],
-    packageFields: ['vitePackageFields'],
-    tsconfig: ['viteTsconfig'],
-    files: ['viteFiles'],
-    allowBuilds: ['viteAllowBuilds'],
-    output: ['viteOutput'],
-    buildAssets: ['viteBuildAssets'],
+    toolPackages: ['archetypeToolPackages'],
+    runtimePackages: ['archetypeRuntimePackages'],
+    ambientTypes: ['baseAmbientTypes'],
+    allowBuilds: ['archetypeAllowBuilds'],
+    generatedFiles: ['viteGeneratedFiles'],
   })
-
-  return feature('vite-react', 'archetype', intent, module, {
+  return feature('vite-react', 'archetype', externalValues, module, {
     typecheck: true,
     build: 'vite',
     devInstall: true,
   })
 }
 
-export function prettier(options = {}) {
-  const intent = { ...prettierDefaults, ...options }
+export function prettier({
+  semi = false,
+  tabWidth = 2,
+  singleQuote = true,
+  printWidth = 100,
+  trailingComma = 'none',
+} = {}) {
+  const externalValues = {
+    formatSemicolons: semi,
+    formatTabWidth: tabWidth,
+    formatSingleQuotes: singleQuote,
+    formatPrintWidth: printWidth,
+    formatTrailingCommas: trailingComma,
+  }
   const module = calculationModule('prettier', {
-    prettierIntent: external(),
+    formatSemicolons: external(),
+    formatTabWidth: external(),
+    formatSingleQuotes: external(),
+    formatPrintWidth: external(),
+    formatTrailingCommas: external(),
     prettierToolPackages: calculated(['action', 'devAction'], (action, devAction) =>
       action === devAction ? ['prettier'] : []),
-    prettierFiles: calculated(['action', 'devAction', 'prettierIntent'], (action, devAction, policy) =>
-      action === devAction ? { '.prettierrc.json': policy } : {}),
+    'prettier.$schema': calculated([], () => 'https://json.schemastore.org/prettierrc'),
+    'prettier.semi': calculated(['formatSemicolons'], value => value),
+    'prettier.tabWidth': calculated(['formatTabWidth'], value => value),
+    'prettier.singleQuote': calculated(['formatSingleQuotes'], value => value),
+    'prettier.printWidth': calculated(['formatPrintWidth'], value => value),
+    'prettier.trailingComma': calculated(['formatTrailingCommas'], value => value),
+    prettierConfig: calculated(
+      [
+        'action',
+        'devAction',
+        'prettier.$schema',
+        'prettier.semi',
+        'prettier.tabWidth',
+        'prettier.singleQuote',
+        'prettier.printWidth',
+        'prettier.trailingComma',
+      ],
+      (action, devAction, schema, semicolons, width, quotes, printWidth, commas) =>
+        action === devAction
+          ? { $schema: schema, semi: semicolons, tabWidth: width, singleQuote: quotes, printWidth, trailingComma: commas }
+          : undefined,
+    ),
+    prettierGeneratedFiles: calculated(
+      ['prettierConfig'],
+      config => config === undefined ? {} : { '.prettierrc.json': config },
+    ),
   }, {
     toolPackages: ['prettierToolPackages'],
-    files: ['prettierFiles'],
+    generatedFiles: ['prettierGeneratedFiles'],
   })
-  return feature('prettier', 'capability', intent, module)
+  return feature('prettier', 'capability', externalValues, module)
 }
 
 export function vitest({ environment = 'node', globals = false, typecheck = false } = {}) {
-  const intent = { environment, globals, typecheck }
+  const externalValues = {
+    testEnvironment: environment,
+    testGlobalsIntent: globals,
+    testTypecheckIntent: typecheck,
+  }
   const module = calculationModule('vitest', {
-    vitestIntent: external(),
-    vitestToolPackages: calculated(['action', 'vitestDependencyActions'], (action, actions) =>
-      hasAction(actions, action) ? ['vitest', ...(environment === 'jsdom' ? ['jsdom'] : [])] : []),
-    vitestTsconfig: calculated(
-      ['action', 'vitestTypeActions', 'vitestIntent'],
-      (action, actions, options) => options.globals && hasAction(actions, action)
-        ? { compilerOptions: { types: ['vitest/globals'] } }
-        : {},
+    testEnvironment: external(),
+    testGlobalsIntent: external(),
+    testTypecheckIntent: external(),
+    vitestToolPackages: calculated(['action', 'vitestDependencyActions', 'testEnvironment'], (action, actions, env) =>
+      hasAction(actions, action) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : []),
+    vitestAmbientTypes: calculated(
+      ['action', 'vitestTypeActions', 'testGlobalsIntent'],
+      (action, actions, globals) => globals && hasAction(actions, action) ? ['vitest/globals'] : [],
     ),
-    vitestFiles: calculated(['action', 'vitestActions', 'vitestIntent'], (action, actions, options) => {
-      if (!hasAction(actions, action)) return {}
-      const body = options.environment === 'jsdom'
-        ? `import { fileURLToPath } from 'node:url'
+    'vitest.test.environment': calculated(['testEnvironment'], value => value),
+    'vitest.test.globals': calculated(['testGlobalsIntent'], value => value),
+    'vitest.test.typecheck.enabled': calculated(['testTypecheckIntent'], value => value),
+    'vitest.test.exclude': calculated(
+      ['testEnvironment'],
+      env => env === 'jsdom' ? ['...configDefaults.exclude', 'e2e/**'] : undefined,
+    ),
+    'vitest.test.root': calculated(
+      ['testEnvironment'],
+      env => env === 'jsdom' ? './' : undefined,
+    ),
+    vitestConfig: calculated(
+      [
+        'action',
+        'vitestActions',
+        'vitest.test.environment',
+        'vitest.test.globals',
+        'vitest.test.typecheck.enabled',
+        'vitest.test.exclude',
+        'vitest.test.root',
+      ],
+      (action, actions, env, globals, typecheckEnabled, exclude, root) => {
+        if (!hasAction(actions, action)) return undefined
+        if (env === 'jsdom') return `import { fileURLToPath } from 'node:url'
 import { defineConfig, configDefaults, mergeConfig } from 'vitest/config'
 import viteConfig from './vite.config'
 
 export default mergeConfig(viteConfig, defineConfig({ test: {
-  environment: 'jsdom',
-  exclude: [...configDefaults.exclude, 'e2e/**'],
-  root: fileURLToPath(new URL('./', import.meta.url)),
-  globals: ${options.globals},
-  typecheck: { enabled: ${options.typecheck} },
+  environment: ${JSON.stringify(env)},
+  exclude: [...configDefaults.exclude, ${JSON.stringify(exclude[1])}],
+  root: fileURLToPath(new URL(${JSON.stringify(root)}, import.meta.url)),
+  globals: ${globals},
+  typecheck: { enabled: ${typecheckEnabled} },
 } }))
 `
-        : `import { defineConfig } from 'vitest/config'
+        return `import { defineConfig } from 'vitest/config'
 
 export default defineConfig({ test: {
-  environment: ${JSON.stringify(options.environment)},
-  globals: ${options.globals},
-  typecheck: { enabled: ${options.typecheck} },
+  environment: ${JSON.stringify(env)},
+  globals: ${globals},
+  typecheck: { enabled: ${typecheckEnabled} },
 } })
 `
-      return { 'vitest.config.ts': body }
-    }),
+      },
+    ),
+    vitestGeneratedFiles: calculated(
+      ['vitestConfig'],
+      config => config === undefined ? {} : { 'vitest.config.ts': config },
+    ),
     vitestAllowBuilds: calculated([], () => ['esbuild']),
   }, {
     toolPackages: ['vitestToolPackages'],
-    tsconfig: ['vitestTsconfig'],
-    files: ['vitestFiles'],
+    ambientTypes: ['vitestAmbientTypes'],
+    generatedFiles: ['vitestGeneratedFiles'],
     allowBuilds: ['vitestAllowBuilds'],
   })
-  return feature('vitest', 'capability', intent, module, { test: true })
+  return feature('vitest', 'capability', externalValues, module, { test: true })
 }
 
-const eslintConfig = options => `import js from '@eslint/js'
+export function eslint({ prettier: enforceFormatting = false, explicitReturnTypes = false } = {}) {
+  const externalValues = {
+    lintFormattingIntent: enforceFormatting,
+    lintExplicitReturnTypesIntent: explicitReturnTypes,
+  }
+  const module = calculationModule('eslint', {
+    lintFormattingIntent: external(),
+    lintExplicitReturnTypesIntent: external(),
+    eslintToolPackages: calculated(
+      ['action', 'eslintActions', 'lintFormattingIntent'],
+      (action, actions, formatting) => hasAction(actions, action)
+        ? [
+            '@eslint/js',
+            '@typescript-eslint/eslint-plugin',
+            '@typescript-eslint/parser',
+            'eslint',
+            ...(formatting ? ['eslint-plugin-prettier', 'prettier'] : []),
+          ]
+        : [],
+    ),
+    'eslint.languageOptions.parser': calculated([], () => '@typescript-eslint/parser'),
+    'eslint.languageOptions.parserOptions.project': calculated([], () => './tsconfig.json'),
+    'eslint.files': calculated(
+      ['sourceLayout'],
+      layout => [`${layout.directory}/**/*.ts`, `${layout.directory}/**/*.tsx`],
+    ),
+    'eslint.testFiles': calculated(
+      ['sourceLayout'],
+      layout => [
+        `${layout.directory}/**/*.test.ts`,
+        `${layout.directory}/**/*.spec.ts`,
+        `${layout.directory}/**/*.test.tsx`,
+        `${layout.directory}/**/*.spec.tsx`,
+      ],
+    ),
+    'eslint.rules.no-undef': calculated([], () => 'off'),
+    'eslint.rules.no-redeclare': calculated([], () => 'off'),
+    'eslint.rules.@typescript-eslint/no-empty-object-type': calculated([], () => 'off'),
+    'eslint.rules.@typescript-eslint/no-unused-vars': calculated([], () => 'error'),
+    'eslint.rules.@typescript-eslint/explicit-function-return-type': calculated(
+      ['lintExplicitReturnTypesIntent'],
+      enabled => enabled ? 'error' : undefined,
+    ),
+    'eslint.rules.prettier/prettier': calculated(
+      ['lintFormattingIntent'],
+      enabled => enabled ? 'error' : undefined,
+    ),
+    eslintRules: calculated(
+      [
+        'eslint.rules.no-undef',
+        'eslint.rules.no-redeclare',
+        'eslint.rules.@typescript-eslint/no-empty-object-type',
+        'eslint.rules.@typescript-eslint/no-unused-vars',
+        'eslint.rules.@typescript-eslint/explicit-function-return-type',
+        'eslint.rules.prettier/prettier',
+      ],
+      (noUndef, noRedeclare, emptyObject, unused, returns, formatting) => ({
+        'no-undef': noUndef,
+        'no-redeclare': noRedeclare,
+        '@typescript-eslint/no-empty-object-type': emptyObject,
+        '@typescript-eslint/no-unused-vars': unused,
+        ...(returns === undefined ? {} : { '@typescript-eslint/explicit-function-return-type': returns }),
+        ...(formatting === undefined ? {} : { 'prettier/prettier': formatting }),
+      }),
+    ),
+    eslintConfig: calculated(
+      [
+        'action',
+        'eslintActions',
+        'lintFormattingIntent',
+        'eslint.files',
+        'eslint.testFiles',
+        'eslint.languageOptions.parserOptions.project',
+        'eslintRules',
+      ],
+      (action, actions, formatting, files, testFiles, project, rules) => hasAction(actions, action)
+        ? `import js from '@eslint/js'
 import parser from '@typescript-eslint/parser'
 import plugin from '@typescript-eslint/eslint-plugin'
-${options.prettier ? "import prettier from 'eslint-plugin-prettier'\n" : ''}
+${formatting ? "import prettier from 'eslint-plugin-prettier'\n" : ''}
 export default [
   js.configs.recommended,
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx'],
-    languageOptions: { parser, parserOptions: { project: './tsconfig.json' } },
-    plugins: { '@typescript-eslint': plugin${options.prettier ? ', prettier' : ''} },
-    rules: {
-      ...plugin.configs.recommended.rules,
-      'no-undef': 'off',
-      'no-redeclare': 'off',
-      '@typescript-eslint/no-empty-object-type': 'off',
-      '@typescript-eslint/no-unused-vars': 'error',
-      ${options.explicitReturnTypes ? "'@typescript-eslint/explicit-function-return-type': 'error'," : ''}
-      ${options.prettier ? "'prettier/prettier': 'error'," : ''}
-    },
+    files: ${JSON.stringify(files)},
+    languageOptions: { parser, parserOptions: { project: ${JSON.stringify(project)} } },
+    plugins: { '@typescript-eslint': plugin${formatting ? ', prettier' : ''} },
+    rules: { ...plugin.configs.recommended.rules, ...${JSON.stringify(rules)} },
   },
   {
-    files: ['**/*.test.ts', '**/*.spec.ts'],
+    files: ${JSON.stringify(testFiles)},
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
@@ -320,55 +420,62 @@ export default [
   },
 ]
 `
-
-export function eslint({ prettier: prettierEnabled = false, explicitReturnTypes = false } = {}) {
-  const intent = { prettier: prettierEnabled, explicitReturnTypes }
-  const module = calculationModule('eslint', {
-    eslintIntent: external(),
-    eslintToolPackages: calculated(['action', 'eslintActions', 'eslintIntent'], (action, actions, options) =>
-      hasAction(actions, action)
-        ? [
-            '@eslint/js',
-            '@typescript-eslint/eslint-plugin',
-            '@typescript-eslint/parser',
-            'eslint',
-            ...(options.prettier ? ['eslint-plugin-prettier', 'prettier'] : []),
-          ]
-        : []),
-    eslintFiles: calculated(['action', 'eslintActions', 'eslintIntent'], (action, actions, options) =>
-      hasAction(actions, action) ? { 'eslint.config.mjs': eslintConfig(options) } : {}),
+        : undefined,
+    ),
+    eslintGeneratedFiles: calculated(
+      ['eslintConfig'],
+      config => config === undefined ? {} : { 'eslint.config.mjs': config },
+    ),
   }, {
     toolPackages: ['eslintToolPackages'],
-    files: ['eslintFiles'],
+    generatedFiles: ['eslintGeneratedFiles'],
   })
-  return feature('eslint', 'capability', intent, module, { lint: true })
+  return feature('eslint', 'capability', externalValues, module, { lint: true })
 }
 
 export function typedoc({ title } = {}) {
-  const intent = { title }
+  const externalValues = { documentationTitle: title }
   const module = calculationModule('typedoc', {
-    typedocIntent: external(),
+    documentationTitle: external(),
     typedocToolPackages: calculated(['action', 'typedocActions'], (action, actions) =>
       hasAction(actions, action) ? ['typedoc'] : []),
-    typedocFiles: calculated(
-      ['action', 'typedocActions', 'typedocIntent', 'sourceEntry', 'name'],
-      (action, actions, options, sourceEntry, name) => hasAction(actions, action)
-        ? {
-            'typedoc.json': {
-              entryPoints: [sourceEntry],
-              name: options.title ?? name,
-              includeVersion: true,
-              excludeExternals: true,
-              excludePrivate: true,
-              excludeProtected: true,
-              exclude: ['**/*.test.ts', '**/*.spec.ts'],
-            },
-          }
-        : {},
+    'typedoc.entryPoints': calculated(['sourceEntry'], entry => [entry]),
+    'typedoc.name': calculated(
+      ['documentationTitle', 'name'],
+      (title, name) => title ?? name,
+    ),
+    'typedoc.includeVersion': calculated([], () => true),
+    'typedoc.excludeExternals': calculated([], () => true),
+    'typedoc.excludePrivate': calculated([], () => true),
+    'typedoc.excludeProtected': calculated([], () => true),
+    'typedoc.exclude': calculated(
+      ['sourceSet'],
+      sources => sources.exclude ?? [],
+    ),
+    typedocConfig: calculated(
+      [
+        'action',
+        'typedocActions',
+        'typedoc.entryPoints',
+        'typedoc.name',
+        'typedoc.includeVersion',
+        'typedoc.excludeExternals',
+        'typedoc.excludePrivate',
+        'typedoc.excludeProtected',
+        'typedoc.exclude',
+      ],
+      (action, actions, entryPoints, name, includeVersion, excludeExternals,
+        excludePrivate, excludeProtected, exclude) => hasAction(actions, action)
+        ? { entryPoints, name, includeVersion, excludeExternals, excludePrivate, excludeProtected, exclude }
+        : undefined,
+    ),
+    typedocGeneratedFiles: calculated(
+      ['typedocConfig'],
+      config => config === undefined ? {} : { 'typedoc.json': config },
     ),
   }, {
     toolPackages: ['typedocToolPackages'],
-    files: ['typedocFiles'],
+    generatedFiles: ['typedocGeneratedFiles'],
   })
-  return feature('typedoc', 'capability', intent, module, { docs: true })
+  return feature('typedoc', 'capability', externalValues, module, { docs: true })
 }

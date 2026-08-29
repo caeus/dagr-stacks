@@ -53,7 +53,7 @@ const projector = features => typescriptProjector(di, {
 })
 
 describe('composable TypeScript projections', () => {
-  it('merges small calculation modules into one inspectable DAG', () => {
+  it('merges small calculation modules into one explicit DAG', () => {
     const features = [
       library({ runtime: 'node' }),
       prettier(),
@@ -63,11 +63,39 @@ describe('composable TypeScript projections', () => {
     ]
     const { graph, project } = projector(features)
 
-    assert.equal(graph.owners.libraryTsconfig, 'library')
-    assert.equal(graph.owners.vitestFiles, 'vitest')
-    assert.equal(graph.owners.packageJson, 'typescript-projection')
-    assert.deepEqual(graph.nodes.featureTsconfig.deps, ['libraryTsconfig', 'vitestTsconfig'])
-    assert.deepEqual(graph.nodes.files.deps, ['packageJson', 'tsconfig', 'featureFiles'])
+    assert.equal(graph.owners.moduleKind, 'library')
+    assert.equal(graph.owners.outputDirectory, 'typescript-conventions')
+    assert.equal(graph.nodes.outputDirectory.kind, 'calculated')
+    assert.deepEqual(graph.nodes.outputDirectory.deps, [])
+    assert.equal(graph.owners['vitest.test.environment'], 'vitest')
+    assert.equal(graph.owners['packageJson.main'], 'package-json-fields')
+    assert.equal(graph.owners['tsconfig.compilerOptions.outDir'], 'tsconfig-fields')
+    assert.deepEqual(graph.nodes['packageJson.main'].deps, ['runtimeEntry'])
+    assert.deepEqual(graph.nodes['packageJson.files'].deps, [
+      'productKind',
+      'distributionIntent',
+      'emittedArtifacts',
+    ])
+    assert.deepEqual(graph.nodes['tsconfig.compilerOptions.outDir'].deps, [
+      'emissionIntent',
+      'outputLayout',
+    ])
+    assert.equal(graph.nodes.libraryTsconfig, undefined)
+    assert.equal(graph.nodes.featurePackageFields, undefined)
+
+    const pack = project('ci:pack')
+    assert.deepEqual(pack.semantics.outputLayout, {
+      directory: 'dist',
+      runtimeFile: 'dist/index.js',
+      declarationFile: 'dist/index.d.ts',
+    })
+    assert.equal(pack.semantics.runtimeEntry, './dist/index.js')
+    assert.equal(pack.semantics.declarationEntry, './dist/index.d.ts')
+    assert.deepEqual(pack.semantics.emittedArtifacts, ['dist'])
+    assert.equal(pack.packageJson.main, './dist/index.js')
+    assert.equal(pack.packageJson.types, './dist/index.d.ts')
+    assert.deepEqual(pack.packageJson.files, ['dist'])
+    assert.equal(pack.tsconfig.compilerOptions.outDir, 'dist')
     assert.deepEqual(Object.keys(project('dev:sync').files), [
       'package.json',
       'tsconfig.json',
@@ -75,6 +103,52 @@ describe('composable TypeScript projections', () => {
       'vitest.config.ts',
       'eslint.config.mjs',
       'typedoc.json',
+    ])
+  })
+
+  it('treats conventions as replaceable roots of the semantic graph', () => {
+    const { project } = typescriptProjector(di, {
+      location: '//packages/example',
+      scope: 'internal',
+      version: '1.2.3',
+      deps: [],
+      metadata: {},
+      versions,
+      features: [library()],
+      conventions: { sourceDirectory: 'source', outputDirectory: 'build' },
+    })
+
+    const pack = project('ci:pack')
+    assert.deepEqual(pack.semantics.outputLayout, {
+      directory: 'build',
+      runtimeFile: 'build/index.js',
+      declarationFile: 'build/index.d.ts',
+    })
+    assert.deepEqual(pack.semantics.sourceLayout, { directory: 'source', entry: 'index.ts' })
+    assert.equal(project('ci:build').tsconfig.compilerOptions.outDir, 'build')
+    assert.equal(project('ci:build').tsconfig.compilerOptions.rootDir, 'source')
+    assert.deepEqual(pack.packageJson.files, ['build'])
+    assert.equal(pack.packageJson.main, './build/index.js')
+  })
+
+  it('projects source conventions into every tool that consumes source paths', () => {
+    const { project } = typescriptProjector(di, {
+      location: '//packages/example',
+      scope: 'internal',
+      version: '1.2.3',
+      deps: [],
+      metadata: {},
+      versions,
+      features: [library(), eslint(), typedoc()],
+      conventions: { sourceDirectory: 'source' },
+    })
+
+    const lint = project('ci:lint')
+    const docs = project('ci:docs')
+    assert.match(lint.files['eslint.config.mjs'], /source\/\*\*\/\*\.ts/)
+    assert.deepEqual(docs.files['typedoc.json'].exclude, [
+      'source/**/*.test.ts',
+      'source/**/*.spec.ts',
     ])
   })
 
@@ -132,7 +206,7 @@ describe('composable TypeScript projections', () => {
 
     assert.equal(dev.packageJson.dependencies.react, '19')
     assert.deepEqual(dev.tsconfig.compilerOptions.lib, ['ES2020', 'DOM', 'DOM.Iterable'])
-    assert.match(dev.files['vitest.config.ts'], /environment: 'jsdom'/)
+    assert.match(dev.files['vitest.config.ts'], /environment: "jsdom"/)
     assert.deepEqual(build.buildAssets, ['index.html', 'public'])
     assert.deepEqual(build.output, { directory: 'dist' })
   })

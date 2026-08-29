@@ -13,7 +13,7 @@ function writeProjectedFile(path, value) {
     : writeJson(`/repo/${path}`, value)
 }
 
-const copySource = () => ({ COPY: { src: 'src', dest: '/repo/src' } })
+const copySource = directory => ({ COPY: { src: directory, dest: `/repo/${directory}` } })
 
 const copyAssets = assets => assets.map(path => ({ COPY: { src: path, dest: `/repo/${path}` } }))
 
@@ -22,6 +22,7 @@ function createStack(options, features, declaration) {
     base = '//packages/base:ci:node-pnpm',
     scope = 'internal',
     versions = bundledVersions.deps,
+    conventions = {},
     ignore = RECOMMENDED_IGNORE,
     transform = index => index,
   } = options
@@ -43,6 +44,7 @@ function createStack(options, features, declaration) {
     metadata,
     versions,
     features,
+    conventions,
   })
   const { name, slug } = project('dev:sync')
 
@@ -87,11 +89,18 @@ function createStack(options, features, declaration) {
 
   const check = (action, command) => ({
     deps: [`install-${action}`],
-    run: ({ images }) => ({
-      FROM: images[`install-${action}`],
-      steps: [copySource(), { WORKDIR: '/repo' }, { RUN: command }],
-      IGNORE: ignore,
-    }),
+    run: ({ images }) => {
+      const projection = project(`ci:${action}`)
+      return {
+        FROM: images[`install-${action}`],
+        steps: [
+          copySource(projection.semantics.sourceLayout.directory),
+          { WORKDIR: '/repo' },
+          { RUN: command },
+        ],
+        IGNORE: ignore,
+      }
+    },
   })
 
   const qualityTargets = [
@@ -106,7 +115,7 @@ function createStack(options, features, declaration) {
       return {
         FROM: images['install-build'],
         steps: [
-          copySource(),
+          copySource(projection.semantics.sourceLayout.directory),
           ...copyAssets(projection.buildAssets),
           { WORKDIR: '/repo' },
           { RUN: execution.build === 'vite' ? 'pnpm exec vite build' : 'pnpm exec tsc' },
@@ -187,18 +196,25 @@ function createStack(options, features, declaration) {
       ...Object.fromEntries(installActions.map(action => [`install-${action}`, install(action)])),
       ...(execution.typecheck ? { typecheck: check('typecheck', 'pnpm exec tsc --noEmit') } : {}),
       ...(execution.test ? { test: check('test', 'pnpm exec vitest run') } : {}),
-      ...(execution.lint ? { lint: check('lint', "pnpm exec eslint 'src/**/*.{ts,tsx}'") } : {}),
+      ...(execution.lint ? { lint: check('lint', 'pnpm exec eslint .') } : {}),
       ...(build ? { build } : {}),
       ...(execution.docs
         ? {
             docs: {
               deps: ['install-docs'],
-              run: ({ images }) => ({
-                FROM: images['install-docs'],
-                steps: [copySource(), { WORKDIR: '/repo' }, { RUN: 'pnpm exec typedoc' }],
-                IGNORE: ignore,
-                EXPORT: { '/repo/docs/': 'docs/' },
-              }),
+              run: ({ images }) => {
+                const projection = project('ci:docs')
+                return {
+                  FROM: images['install-docs'],
+                  steps: [
+                    copySource(projection.semantics.sourceLayout.directory),
+                    { WORKDIR: '/repo' },
+                    { RUN: 'pnpm exec typedoc' },
+                  ],
+                  IGNORE: ignore,
+                  EXPORT: { '/repo/docs/': 'docs/' },
+                }
+              },
             },
           }
         : {}),

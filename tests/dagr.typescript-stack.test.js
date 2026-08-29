@@ -62,7 +62,11 @@ describe('mountable TypeScript stack', () => {
       'typescript': '6',
       'vitest': '3',
     }
-    const project = stack.default({ base: 'base', versions })
+    const project = stack.default({
+      base: 'base',
+      versions,
+      conventions: { sourceDirectory: 'source' },
+    })
       .with(stack.library())
       .with(stack.vitest())
     const index = project({ location: '//example', version: '1.0.0' })
@@ -78,5 +82,8 @@ describe('mountable TypeScript stack', () => {
       'pack',
     ])
     assert.deepEqual(Object.keys(index.publish), ['pack'])
+    const sourceCopy = index.ci.typecheck.run({ images: { 'install-typecheck': 'image' } }).steps[0]
+    assert.equal(sourceCopy.COPY.src, 'source')
+    assert.equal(sourceCopy.COPY.dest, '/repo/source')
   })
 })

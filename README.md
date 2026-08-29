@@ -26,6 +26,9 @@ location-specific policy.
 See [`ts-library`](ts-library/) for the concrete fact, intent, action, external policy, and derived
 configuration mapping.
 
+[`typescript`](typescript/) is the composable successor. Its library, Cloudflare worker, Vite
+React, test, lint, format, and documentation modules merge into one explicit calculation DAG.
+
 ## Convention
 
 Each top-level directory contains one independently consumable component. Build stacks expose:

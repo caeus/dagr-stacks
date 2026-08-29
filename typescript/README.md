@@ -103,7 +103,7 @@ typescript({
 
 | Source | Keys |
 | --- | --- |
-| Conventions | `targetActions`, `developmentActions`, `distributionActions`, `emitActions`, `testSourceActions`, `vitestActions`, `vitestDependencyActions`, `vitestTypeActions`, `eslintActions`, `typedocActions`, `viteActions`, `devAction`, `publishAction`, `dependencyLocations`, `metadataFields`, `sourceDirectory`, `entryFile`, `outputDirectory`, `javascriptModuleFormat` |
+| Conventions | `targetActions`, `developmentActions`, `distributionActions`, `emitActions`, `testSourceActions`, `vitestActions`, `vitestDependencyActions`, `vitestTypeActions`, `prettierActions`, `eslintActions`, `typedocActions`, `viteActions`, `devAction`, `publishAction`, `dependencyLocations`, `metadataFields`, `sourceDirectory`, `entryFile`, `outputDirectory`, `javascriptModuleFormat` |
 | External package facts | `location`, `scope`, `version`, `deps`, `metadata`, `versions` |
 | Selected context | `target` |
 | Semantic calculations | `action`, `name`, `slug`, `validatedMetadata`, `sourceLayout`, `sourceEntry`, `outputLayout`, `distributionIntent`, `emissionIntent`, `testSourcesIncluded`, `sourceSet`, `runtimeEntry`, `declarationEntry`, `emittedArtifacts`, `publishable`, `sourceMapEmission`, `ambientTypes` |
@@ -136,7 +136,7 @@ Every archetype provides the same tool-neutral contract:
 | --- | --- |
 | `prettier()` | `formatSemicolons`, `formatTabWidth`, `formatSingleQuotes`, `formatPrintWidth`, `formatTrailingCommas`, `prettierToolPackages`, `prettier.$schema`, `prettier.semi`, `prettier.tabWidth`, `prettier.singleQuote`, `prettier.printWidth`, `prettier.trailingComma`, `prettierConfig`, `prettierGeneratedFiles` |
 | `vitest()` | `testEnvironment`, `testGlobalsIntent`, `testTypecheckIntent`, `vitestToolPackages`, `vitestAmbientTypes`, `vitest.test.environment`, `vitest.test.globals`, `vitest.test.typecheck.enabled`, `vitest.test.exclude`, `vitest.test.root`, `vitestConfig`, `vitestGeneratedFiles`, `vitestAllowBuilds` |
-| `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles` |
+| `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.no-dupe-class-members`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles` |
 | `typedoc()` | `documentationTitle`, `typedocToolPackages`, `typedoc.entryPoints`, `typedoc.name`, `typedoc.includeVersion`, `typedoc.excludeExternals`, `typedoc.excludePrivate`, `typedoc.excludeProtected`, `typedoc.exclude`, `typedocConfig`, `typedocGeneratedFiles` |
 
 ## Archetypes

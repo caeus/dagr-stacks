@@ -94,6 +94,7 @@ const DEFAULT_CONVENTIONS = Object.freeze({
   vitestActions: Object.freeze(['dev', 'test']),
   vitestDependencyActions: Object.freeze(['dev', 'test', 'lint']),
   vitestTypeActions: Object.freeze(['dev', 'test', 'lint']),
+  prettierActions: Object.freeze(['dev', 'lint']),
   eslintActions: Object.freeze(['dev', 'lint']),
   typedocActions: Object.freeze(['dev', 'docs']),
   viteActions: Object.freeze(['dev', 'test', 'build']),

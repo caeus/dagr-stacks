@@ -174,6 +174,15 @@ describe('composable TypeScript projections', () => {
       'src/**/*.spec.ts',
     ])
     assert.equal(dev.files['.prettierrc.json'].semi, true)
+    assert.deepEqual(project('ci:lint').files['.prettierrc.json'], {
+      $schema: 'https://json.schemastore.org/prettierrc',
+      semi: true,
+      tabWidth: 2,
+      singleQuote: true,
+      printWidth: 100,
+      trailingComma: 'all',
+    })
+    assert.match(project('ci:lint').files['eslint.config.mjs'], /"no-dupe-class-members":"off"/)
     assert.match(dev.files['vitest.config.ts'], /typecheck: \{ enabled: true \}/)
     assert.deepEqual(build.buildAssets, ['README.md', 'LICENSE'])
     assert.deepEqual(docs.tsconfig.exclude, ['src/**/*.test.ts', 'src/**/*.spec.ts'])

@@ -213,8 +213,8 @@ export function prettier({
     formatSingleQuotes: external(),
     formatPrintWidth: external(),
     formatTrailingCommas: external(),
-    prettierToolPackages: calculated(['action', 'devAction'], (action, devAction) =>
-      action === devAction ? ['prettier'] : []),
+    prettierToolPackages: calculated(['action', 'prettierActions'], (action, actions) =>
+      hasAction(actions, action) ? ['prettier'] : []),
     'prettier.$schema': calculated([], () => 'https://json.schemastore.org/prettierrc'),
     'prettier.semi': calculated(['formatSemicolons'], value => value),
     'prettier.tabWidth': calculated(['formatTabWidth'], value => value),
@@ -224,7 +224,7 @@ export function prettier({
     prettierConfig: calculated(
       [
         'action',
-        'devAction',
+        'prettierActions',
         'prettier.$schema',
         'prettier.semi',
         'prettier.tabWidth',
@@ -232,8 +232,8 @@ export function prettier({
         'prettier.printWidth',
         'prettier.trailingComma',
       ],
-      (action, devAction, schema, semicolons, width, quotes, printWidth, commas) =>
-        action === devAction
+      (action, actions, schema, semicolons, width, quotes, printWidth, commas) =>
+        hasAction(actions, action)
           ? { $schema: schema, semi: semicolons, tabWidth: width, singleQuote: quotes, printWidth, trailingComma: commas }
           : undefined,
     ),
@@ -360,6 +360,7 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
     ),
     'eslint.rules.no-undef': calculated([], () => 'off'),
     'eslint.rules.no-redeclare': calculated([], () => 'off'),
+    'eslint.rules.no-dupe-class-members': calculated([], () => 'off'),
     'eslint.rules.@typescript-eslint/no-empty-object-type': calculated([], () => 'off'),
     'eslint.rules.@typescript-eslint/no-unused-vars': calculated([], () => 'error'),
     'eslint.rules.@typescript-eslint/explicit-function-return-type': calculated(
@@ -374,14 +375,16 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
       [
         'eslint.rules.no-undef',
         'eslint.rules.no-redeclare',
+        'eslint.rules.no-dupe-class-members',
         'eslint.rules.@typescript-eslint/no-empty-object-type',
         'eslint.rules.@typescript-eslint/no-unused-vars',
         'eslint.rules.@typescript-eslint/explicit-function-return-type',
         'eslint.rules.prettier/prettier',
       ],
-      (noUndef, noRedeclare, emptyObject, unused, returns, formatting) => ({
+      (noUndef, noRedeclare, noDupeClassMembers, emptyObject, unused, returns, formatting) => ({
         'no-undef': noUndef,
         'no-redeclare': noRedeclare,
+        'no-dupe-class-members': noDupeClassMembers,
         '@typescript-eslint/no-empty-object-type': emptyObject,
         '@typescript-eslint/no-unused-vars': unused,
         ...(returns === undefined ? {} : { '@typescript-eslint/explicit-function-return-type': returns }),

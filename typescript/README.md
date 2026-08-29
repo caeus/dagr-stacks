@@ -81,6 +81,64 @@ semantics. `packageJson` and `tsconfig` only assemble their field nodes plus pas
 The transform context exposes `calculations` as the graph structure. A dedicated inspection API is
 intentionally left for later.
 
+## DI keys
+
+Keys are plain JavaScript strings. The exact graph depends on the selected archetype and
+capabilities. Only the convention keys are accepted by `typescript({ conventions })`; the remaining
+keys describe the internal calculation graph and are available to transforms through
+`calculations.nodes`.
+
+```js
+typescript({
+  transform(index, { calculations }) {
+    for (const [name, definition] of Object.entries(calculations.nodes)) {
+      console.log(name, definition.kind, definition.deps)
+    }
+    return index
+  },
+})
+```
+
+### Core keys
+
+| Source | Keys |
+| --- | --- |
+| Conventions | `targetActions`, `developmentActions`, `distributionActions`, `emitActions`, `testSourceActions`, `vitestActions`, `vitestDependencyActions`, `vitestTypeActions`, `eslintActions`, `typedocActions`, `viteActions`, `devAction`, `publishAction`, `dependencyLocations`, `metadataFields`, `sourceDirectory`, `entryFile`, `outputDirectory`, `javascriptModuleFormat` |
+| External package facts | `location`, `scope`, `version`, `deps`, `metadata`, `versions` |
+| Selected context | `target` |
+| Semantic calculations | `action`, `name`, `slug`, `validatedMetadata`, `sourceLayout`, `sourceEntry`, `outputLayout`, `distributionIntent`, `emissionIntent`, `testSourcesIncluded`, `sourceSet`, `runtimeEntry`, `declarationEntry`, `emittedArtifacts`, `publishable`, `sourceMapEmission`, `ambientTypes` |
+| Feature aggregates | `featureToolPackages`, `featureRuntimePackages`, `featureAmbientTypes`, `featureGeneratedFiles`, `featureAllowBuilds` |
+
+### Package and TypeScript projections
+
+| Group | Keys |
+| --- | --- |
+| Dependency calculations | `dependencyEntries`, `toolDependencyEntries` |
+| Package fields | `packageJson.name`, `packageJson.version`, `packageJson.type`, `packageJson.private`, `packageJson.main`, `packageJson.types`, `packageJson.exports`, `packageJson.files`, `packageJson.imports`, `packageJson.dependencies`, `packageJson.devDependencies` |
+| Package assembly | `packageJson` |
+| TypeScript fields | `tsconfig.extends`, `tsconfig.include`, `tsconfig.exclude`, `tsconfig.compilerOptions.rootDir`, `tsconfig.compilerOptions.outDir`, `tsconfig.compilerOptions.target`, `tsconfig.compilerOptions.lib`, `tsconfig.compilerOptions.module`, `tsconfig.compilerOptions.moduleResolution`, `tsconfig.compilerOptions.noEmit`, `tsconfig.compilerOptions.declaration`, `tsconfig.compilerOptions.sourceMap`, `tsconfig.compilerOptions.inlineSources`, `tsconfig.compilerOptions.types`, `tsconfig.compilerOptions.paths`, `tsconfig.compilerOptions.allowImportingTsExtensions`, `tsconfig.compilerOptions.moduleDetection`, `tsconfig.compilerOptions.jsx` |
+| TypeScript assembly | `compilerOptions`, `tsconfig` |
+| Final projection | `files`, `allowBuilds`, `output`, `projection` |
+
+### Archetype keys
+
+Every archetype provides the same tool-neutral contract:
+
+| Kind | Keys |
+| --- | --- |
+| Archetype facts | `productKind`, `runtimeKind`, `languageTarget`, `sourceMapIntent`, `buildAssetInputs` |
+| Archetype calculations | `moduleKind`, `moduleResolutionKind`, `standardLibraries`, `baseAmbientTypes`, `sourceAlias`, `archetypeToolPackages`, `archetypeRuntimePackages`, `archetypeAllowBuilds`, `buildAssets` |
+| Additional `viteReact()` keys | `vite.plugins`, `vite.resolve.alias`, `viteConfig`, `viteGeneratedFiles` |
+
+### Capability keys
+
+| Capability | Keys |
+| --- | --- |
+| `prettier()` | `formatSemicolons`, `formatTabWidth`, `formatSingleQuotes`, `formatPrintWidth`, `formatTrailingCommas`, `prettierToolPackages`, `prettier.$schema`, `prettier.semi`, `prettier.tabWidth`, `prettier.singleQuote`, `prettier.printWidth`, `prettier.trailingComma`, `prettierConfig`, `prettierGeneratedFiles` |
+| `vitest()` | `testEnvironment`, `testGlobalsIntent`, `testTypecheckIntent`, `vitestToolPackages`, `vitestAmbientTypes`, `vitest.test.environment`, `vitest.test.globals`, `vitest.test.typecheck.enabled`, `vitest.test.exclude`, `vitest.test.root`, `vitestConfig`, `vitestGeneratedFiles`, `vitestAllowBuilds` |
+| `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles` |
+| `typedoc()` | `documentationTitle`, `typedocToolPackages`, `typedoc.entryPoints`, `typedoc.name`, `typedoc.includeVersion`, `typedoc.excludeExternals`, `typedoc.excludePrivate`, `typedoc.excludeProtected`, `typedoc.exclude`, `typedocConfig`, `typedocGeneratedFiles` |
+
 ## Archetypes
 
 Exactly one archetype is required:

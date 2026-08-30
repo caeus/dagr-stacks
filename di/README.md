@@ -22,6 +22,32 @@ const container = module.shake(['greeting']).compile()
 container.greeting
 ```
 
+Providers can carry tags. A `{ tag }` dependency collects every matching binding into a frozen
+record at that argument position:
+
+```js
+const handler = Symbol('handler')
+const symbolicHandler = Symbol('symbolicHandler')
+
+const module = di.module({
+  json: toValue(input => JSON.parse(input), [handler]),
+  [symbolicHandler]: toFun([], () => input => input, new Set([handler])),
+  handlers: toFun([{ tag: handler }], handlers => handlers),
+})
+
+const handlers = module.shake(['handlers']).compile().handlers
+handlers.json('{"ready":true}')
+handlers[symbolicHandler]('text')
+```
+
+`toValue(value, tags)`, `toFun(deps, factory, tags)`, and `toClass(deps, Class, tags)` accept tags
+as an array or set of property keys. Direct dependencies remain property keys. Tag selectors and
+direct dependencies can be mixed in any order.
+
+Tag collection is module-wide and unordered. No matches produce a frozen `{}`. `shake` retains
+all matching bindings and their transitive dependencies. A provider depending on its own tag is a
+cycle. Since `merge` replaces the complete definition, it replaces that binding's tags too.
+
 Modules are immutable. `merge` is right-biased, like object spread: definitions in the argument
 override definitions in the receiver. `shake` returns a new module containing the requested roots
 and their transitive dependencies.

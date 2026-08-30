@@ -51,8 +51,101 @@ describe('di', () => {
     const binding = module.definitionOf('answer')
 
     assert.deepEqual(binding.deps, [])
+    assert.deepEqual(binding.tags, [])
     assert.equal(binding.factory(), 42)
     assert.ok(Object.isFrozen(binding))
+    assert.ok(Object.isFrozen(binding.deps))
+    assert.ok(Object.isFrozen(binding.tags))
+  })
+
+  it('injects every tagged binding as a record', () => {
+    const handler = Symbol('handler')
+    const symbolic = Symbol('symbolic')
+    const container = di.module({
+      first: toValue(1, [handler]),
+      [symbolic]: toValue(2, new Set([handler])),
+      ignored: toValue(3),
+      handlers: toFun([{ tag: handler }], handlers => handlers),
+    }).compile()
+
+    assert.deepEqual(Reflect.ownKeys(container.handlers), ['first', symbolic])
+    assert.equal(container.handlers.first, 1)
+    assert.equal(container.handlers[symbolic], 2)
+    assert.ok(Object.isFrozen(container.handlers))
+  })
+
+  it('injects an empty record when no binding has the tag', () => {
+    const container = di.module({
+      bindings: toFun([{ tag: 'missing' }], bindings => bindings),
+    }).compile()
+
+    assert.deepEqual(container.bindings, {})
+    assert.ok(Object.isFrozen(container.bindings))
+  })
+
+  it('preserves dependency positions when direct and tagged dependencies mix', () => {
+    const prefix = Symbol('prefix')
+    const container = di.module({
+      [prefix]: toValue('item:'),
+      first: toValue(1, ['item']),
+      result: toFun(
+        [prefix, { tag: 'item' }],
+        (prefixValue, items) => `${prefixValue}${items.first}`,
+      ),
+    }).compile()
+
+    assert.equal(container.result, 'item:1')
+    assert.equal(container[prefix], 'item:')
+  })
+
+  it('shakes tagged bindings and their transitive dependencies', () => {
+    const symbolic = Symbol('symbolic')
+    const shaken = di.module({
+      prefix: toValue('item:'),
+      first: toFun(['prefix'], prefix => `${prefix}first`, ['item']),
+      [symbolic]: toValue(2, ['item']),
+      ignored: toValue(3),
+      items: toFun([{ tag: 'item' }], items => items),
+    }).shake(['items'])
+
+    assert.deepEqual([...shaken.keys()], ['prefix', 'first', 'items', symbolic])
+    assert.equal(shaken.compile().items.first, 'item:first')
+  })
+
+  it('replaces tags when a binding is overridden', () => {
+    const base = di.module({
+      value: toValue(1, ['item']),
+      items: toFun([{ tag: 'item' }], items => items),
+    })
+    const merged = base.merge(di.module({ value: toValue(2) }))
+
+    assert.deepEqual(merged.shake(['items']).compile().items, {})
+  })
+
+  it('rejects cycles introduced by tag dependencies', () => {
+    const value = Symbol('value')
+    const module = di.module({
+      [value]: toFun([{ tag: 'loop' }], values => values, ['loop']),
+    })
+
+    assert.throws(
+      () => module.compile(),
+      /Circular dependency: Symbol\(value\) -> Symbol\(value\)/,
+    )
+  })
+
+  it('copies tag and selector inputs at definition time', () => {
+    const tag = Symbol('tag')
+    const selector = { tag }
+    const tags = [tag]
+    const binding = toFun([selector], values => values, tags)
+
+    selector.tag = 'changed'
+    tags[0] = 'changed'
+
+    assert.deepEqual(binding.deps, [{ tag }])
+    assert.deepEqual(binding.tags, [tag])
+    assert.ok(Object.isFrozen(binding.deps[0]))
   })
 
   it('rejects missing bindings', () => {

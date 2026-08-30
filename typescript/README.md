@@ -157,9 +157,24 @@ other values that only exist to make tools agree.
 - `eslint()` adds lint policy, generated configuration, and `ci:lint`.
 - `typedoc()` adds documentation intent, generated configuration, and `ci:docs`.
 
-Capabilities contribute named dependency, configuration-field, and generated-file nodes. Aggregate
-nodes declare the complete contribution lists as their incoming edges. A collision fails instead of
-silently choosing whichever tool happened to run last.
+Capabilities contribute named dependency, configuration-field, and generated-file nodes. Open-ended
+contributions use DI tags instead of a parallel contribution registry:
+
+| Tag | Collector node |
+| --- | --- |
+| `toolPackages` | `featureToolPackages` |
+| `runtimePackages` | `featureRuntimePackages` |
+| `ambientTypes` | `featureAmbientTypes` |
+| `generatedFiles` | `featureGeneratedFiles` |
+| `allowBuilds` | `featureAllowBuilds` |
+
+Each contributing node carries its tags in the calculation graph. Each collector has a `{ tag }`
+dependency and receives a record keyed by the contributing node names. Adding a capability therefore
+adds bindings to the graph without separately maintaining an aggregate dependency list. Generated
+file collisions still fail instead of silently choosing whichever tool happened to run last.
+
+Tags are only for open-ended collections. Behavioral configuration fields and tool-neutral semantic
+nodes remain ordinary named dependencies, so their exact values and invariants stay inspectable.
 
 The package declaration accepts only facts that cannot be derived: logical location, version,
 dependencies, and passive metadata. `private`, output paths, exports, generated files, scripts, and

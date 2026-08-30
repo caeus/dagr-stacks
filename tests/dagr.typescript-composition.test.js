@@ -80,8 +80,17 @@ describe('composable TypeScript projections', () => {
       'emissionIntent',
       'outputLayout',
     ])
+    assert.deepEqual(graph.nodes.prettierToolPackages.tags, ['toolPackages'])
+    assert.deepEqual(graph.nodes.prettierGeneratedFiles.tags, ['generatedFiles'])
+    assert.deepEqual(graph.nodes.vitestAmbientTypes.tags, ['ambientTypes'])
+    assert.deepEqual(graph.nodes.vitestAllowBuilds.tags, ['allowBuilds'])
+    assert.deepEqual(graph.nodes.featureToolPackages.deps, [{ tag: 'toolPackages' }])
+    assert.deepEqual(graph.nodes.featureGeneratedFiles.deps, [{ tag: 'generatedFiles' }])
+    assert.deepEqual(graph.nodes.featureAmbientTypes.deps, [{ tag: 'ambientTypes' }])
+    assert.deepEqual(graph.nodes.featureAllowBuilds.deps, [{ tag: 'allowBuilds' }])
     assert.equal(graph.nodes.libraryTsconfig, undefined)
     assert.equal(graph.nodes.featurePackageFields, undefined)
+    assert.equal(graph.contributions, undefined)
 
     const pack = project('ci:pack')
     assert.deepEqual(pack.semantics.outputLayout, {

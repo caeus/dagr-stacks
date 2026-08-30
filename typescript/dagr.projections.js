@@ -1,25 +1,22 @@
-const node = (kind, deps = [], factory) => Object.freeze({
+const node = (kind, deps = [], factory, tags = []) => Object.freeze({
   kind,
   deps: Object.freeze([...deps]),
+  tags: Object.freeze([...tags]),
   ...(factory === undefined ? {} : { factory }),
 })
 
 const external = () => node('external')
 const target = () => node('target')
-const calculated = (deps, factory) => node('calculated', deps, factory)
+const calculated = (deps, factory, tags = []) => node('calculated', deps, factory, tags)
 
-const calculationModule = (name, nodes, contributions = {}) => Object.freeze({
+const calculationModule = (name, nodes) => Object.freeze({
   name,
   nodes: Object.freeze({ ...nodes }),
-  contributions: Object.freeze(Object.fromEntries(
-    Object.entries(contributions).map(([kind, names]) => [kind, Object.freeze([...names])]),
-  )),
 })
 
 function mergeCalculationModules(modules) {
   const nodes = {}
   const owners = {}
-  const contributions = {}
   for (const module of modules) {
     for (const [name, definition] of Object.entries(module.nodes)) {
       if (Object.hasOwn(nodes, name)) {
@@ -28,16 +25,10 @@ function mergeCalculationModules(modules) {
       nodes[name] = definition
       owners[name] = module.name
     }
-    for (const [kind, names] of Object.entries(module.contributions)) {
-      contributions[kind] = [...(contributions[kind] ?? []), ...names]
-    }
   }
   return Object.freeze({
     nodes: Object.freeze(nodes),
     owners: Object.freeze(owners),
-    contributions: Object.freeze(Object.fromEntries(
-      Object.entries(contributions).map(([kind, names]) => [kind, Object.freeze(names)]),
-    )),
   })
 }
 
@@ -56,7 +47,10 @@ function compileCalculationGraph(graph, di, externalValues, targetValues, roots)
   const calculations = di.module(Object.fromEntries(
     Object.entries(graph.nodes)
       .filter(([, definition]) => definition.kind === 'calculated')
-      .map(([name, definition]) => [name, di.toFun(definition.deps, definition.factory)]),
+      .map(([name, definition]) => [
+        name,
+        di.toFun(definition.deps, definition.factory, definition.tags),
+      ]),
   ))
   return sourceModule('external')
     .merge(sourceModule('target'))
@@ -185,17 +179,31 @@ const dependencyEntries = (name, scope, deps, versions, dependencyLocations, run
   }
 }
 
-function aggregateModule(contributions) {
-  const deps = kind => contributions[kind] ?? []
+const contributionValues = contributions => Reflect.ownKeys(contributions)
+  .map(name => contributions[name])
+
+function aggregateModule() {
   return calculationModule('feature-contributions', {
-    featureToolPackages: calculated(deps('toolPackages'), (...values) => unique(values)),
-    featureRuntimePackages: calculated(deps('runtimePackages'), (...values) => unique(values)),
-    featureAmbientTypes: calculated(deps('ambientTypes'), (...values) => unique(values)),
-    featureGeneratedFiles: calculated(
-      deps('generatedFiles'),
-      (...values) => mergeObjects('generated file', values),
+    featureToolPackages: calculated(
+      [{ tag: 'toolPackages' }],
+      contributions => unique(contributionValues(contributions)),
     ),
-    featureAllowBuilds: calculated(deps('allowBuilds'), (...values) => unique(values)),
+    featureRuntimePackages: calculated(
+      [{ tag: 'runtimePackages' }],
+      contributions => unique(contributionValues(contributions)),
+    ),
+    featureAmbientTypes: calculated(
+      [{ tag: 'ambientTypes' }],
+      contributions => unique(contributionValues(contributions)),
+    ),
+    featureGeneratedFiles: calculated(
+      [{ tag: 'generatedFiles' }],
+      contributions => mergeObjects('generated file', contributionValues(contributions)),
+    ),
+    featureAllowBuilds: calculated(
+      [{ tag: 'allowBuilds' }],
+      contributions => unique(contributionValues(contributions)),
+    ),
   })
 }
 
@@ -479,12 +487,11 @@ function validateFeatures(features) {
 
 export function typescriptCalculationGraph(features, conventions = {}) {
   validateFeatures(features)
-  const featureGraph = mergeCalculationModules(features.map(feature => feature.module))
   return mergeCalculationModules([
     conventionModule(conventions),
     coreModule,
     ...features.map(feature => feature.module),
-    aggregateModule(featureGraph.contributions),
+    aggregateModule(),
     packageModule,
     tsconfigModule,
     projectionModule,

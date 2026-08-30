@@ -1,17 +1,15 @@
-const node = (kind, deps = [], factory) => Object.freeze({
+const node = (kind, deps = [], factory, tags = []) => Object.freeze({
   kind,
   deps: Object.freeze([...deps]),
+  tags: Object.freeze([...tags]),
   ...(factory === undefined ? {} : { factory }),
 })
 
 const external = () => node('external')
-const calculated = (deps, factory) => node('calculated', deps, factory)
-const calculationModule = (name, nodes, contributions = {}) => Object.freeze({
+const calculated = (deps, factory, tags = []) => node('calculated', deps, factory, tags)
+const calculationModule = (name, nodes) => Object.freeze({
   name,
   nodes: Object.freeze({ ...nodes }),
-  contributions: Object.freeze(Object.fromEntries(
-    Object.entries(contributions).map(([kind, names]) => [kind, Object.freeze([...names])]),
-  )),
 })
 
 const feature = (name, role, externalValues, module, execution = {}) => Object.freeze({
@@ -52,22 +50,22 @@ export function library({
       runtime => runtime === 'node' ? 'NodeNext' : 'Bundler',
     ),
     standardLibraries: calculated(['languageTarget'], target => [target]),
-    baseAmbientTypes: calculated(['runtimeKind'], runtime => runtime === 'node' ? ['node'] : []),
+    baseAmbientTypes: calculated(
+      ['runtimeKind'],
+      runtime => runtime === 'node' ? ['node'] : [],
+      ['ambientTypes'],
+    ),
     sourceAlias: calculated([], () => undefined),
     archetypeToolPackages: calculated(
       ['action', 'developmentActions', 'runtimeKind'],
       (action, actions, runtime) => hasAction(actions, action)
         ? ['@tsconfig/strictest', ...(runtime === 'node' ? ['@types/node'] : []), 'typescript']
         : [],
+      ['toolPackages'],
     ),
-    archetypeRuntimePackages: calculated([], () => []),
-    archetypeAllowBuilds: calculated([], () => []),
+    archetypeRuntimePackages: calculated([], () => [], ['runtimePackages']),
+    archetypeAllowBuilds: calculated([], () => [], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
-  }, {
-    toolPackages: ['archetypeToolPackages'],
-    runtimePackages: ['archetypeRuntimePackages'],
-    ambientTypes: ['baseAmbientTypes'],
-    allowBuilds: ['archetypeAllowBuilds'],
   })
   return feature('library', 'archetype', externalValues, module, {
     typecheck: true,
@@ -93,7 +91,7 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
     moduleKind: calculated([], () => 'NodeNext'),
     moduleResolutionKind: calculated([], () => 'NodeNext'),
     standardLibraries: calculated(['languageTarget'], target => [target]),
-    baseAmbientTypes: calculated([], () => ['@cloudflare/workers-types']),
+    baseAmbientTypes: calculated([], () => ['@cloudflare/workers-types'], ['ambientTypes']),
     sourceAlias: calculated(
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
@@ -101,15 +99,10 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
     archetypeToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
       hasAction(actions, action)
         ? ['@tsconfig/strictest', '@cloudflare/workers-types', 'typescript', 'wrangler']
-        : []),
-    archetypeRuntimePackages: calculated([], () => []),
-    archetypeAllowBuilds: calculated([], () => ['sharp', 'workerd']),
+        : [], ['toolPackages']),
+    archetypeRuntimePackages: calculated([], () => [], ['runtimePackages']),
+    archetypeAllowBuilds: calculated([], () => ['sharp', 'workerd'], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
-  }, {
-    toolPackages: ['archetypeToolPackages'],
-    runtimePackages: ['archetypeRuntimePackages'],
-    ambientTypes: ['baseAmbientTypes'],
-    allowBuilds: ['archetypeAllowBuilds'],
   })
   return feature('cloudflare-worker', 'archetype', externalValues, module, { typecheck: true })
 }
@@ -143,7 +136,7 @@ export function viteReact({ language = 'ES2020' } = {}) {
     moduleKind: calculated([], () => 'ESNext'),
     moduleResolutionKind: calculated([], () => 'Bundler'),
     standardLibraries: calculated(['languageTarget'], target => [target, 'DOM', 'DOM.Iterable']),
-    baseAmbientTypes: calculated([], () => []),
+    baseAmbientTypes: calculated([], () => [], ['ambientTypes']),
     sourceAlias: calculated(
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
@@ -151,9 +144,9 @@ export function viteReact({ language = 'ES2020' } = {}) {
     archetypeToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
       hasAction(actions, action)
         ? ['@tsconfig/strictest', '@types/node', '@types/react', '@types/react-dom', 'typescript', 'vite']
-        : []),
-    archetypeRuntimePackages: calculated([], () => viteRuntimePackages),
-    archetypeAllowBuilds: calculated([], () => ['esbuild']),
+        : [], ['toolPackages']),
+    archetypeRuntimePackages: calculated([], () => viteRuntimePackages, ['runtimePackages']),
+    archetypeAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
     'vite.plugins': calculated([], () => ['react', 'tailwindcss']),
     'vite.resolve.alias': calculated(
@@ -178,13 +171,8 @@ export default defineConfig({
     viteGeneratedFiles: calculated(
       ['viteConfig'],
       config => config === undefined ? {} : { 'vite.config.ts': config },
+      ['generatedFiles'],
     ),
-  }, {
-    toolPackages: ['archetypeToolPackages'],
-    runtimePackages: ['archetypeRuntimePackages'],
-    ambientTypes: ['baseAmbientTypes'],
-    allowBuilds: ['archetypeAllowBuilds'],
-    generatedFiles: ['viteGeneratedFiles'],
   })
   return feature('vite-react', 'archetype', externalValues, module, {
     typecheck: true,
@@ -214,7 +202,7 @@ export function prettier({
     formatPrintWidth: external(),
     formatTrailingCommas: external(),
     prettierToolPackages: calculated(['action', 'prettierActions'], (action, actions) =>
-      hasAction(actions, action) ? ['prettier'] : []),
+      hasAction(actions, action) ? ['prettier'] : [], ['toolPackages']),
     'prettier.$schema': calculated([], () => 'https://json.schemastore.org/prettierrc'),
     'prettier.semi': calculated(['formatSemicolons'], value => value),
     'prettier.tabWidth': calculated(['formatTabWidth'], value => value),
@@ -240,10 +228,8 @@ export function prettier({
     prettierGeneratedFiles: calculated(
       ['prettierConfig'],
       config => config === undefined ? {} : { '.prettierrc.json': config },
+      ['generatedFiles'],
     ),
-  }, {
-    toolPackages: ['prettierToolPackages'],
-    generatedFiles: ['prettierGeneratedFiles'],
   })
   return feature('prettier', 'capability', externalValues, module)
 }
@@ -259,10 +245,11 @@ export function vitest({ environment = 'node', globals = false, typecheck = fals
     testGlobalsIntent: external(),
     testTypecheckIntent: external(),
     vitestToolPackages: calculated(['action', 'vitestDependencyActions', 'testEnvironment'], (action, actions, env) =>
-      hasAction(actions, action) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : []),
+      hasAction(actions, action) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : [], ['toolPackages']),
     vitestAmbientTypes: calculated(
       ['action', 'vitestTypeActions', 'testGlobalsIntent'],
       (action, actions, globals) => globals && hasAction(actions, action) ? ['vitest/globals'] : [],
+      ['ambientTypes'],
     ),
     'vitest.test.environment': calculated(['testEnvironment'], value => value),
     'vitest.test.globals': calculated(['testGlobalsIntent'], value => value),
@@ -312,13 +299,9 @@ export default defineConfig({ test: {
     vitestGeneratedFiles: calculated(
       ['vitestConfig'],
       config => config === undefined ? {} : { 'vitest.config.ts': config },
+      ['generatedFiles'],
     ),
-    vitestAllowBuilds: calculated([], () => ['esbuild']),
-  }, {
-    toolPackages: ['vitestToolPackages'],
-    ambientTypes: ['vitestAmbientTypes'],
-    generatedFiles: ['vitestGeneratedFiles'],
-    allowBuilds: ['vitestAllowBuilds'],
+    vitestAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
   })
   return feature('vitest', 'capability', externalValues, module, { test: true })
 }
@@ -342,6 +325,7 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
             ...(formatting ? ['eslint-plugin-prettier', 'prettier'] : []),
           ]
         : [],
+      ['toolPackages'],
     ),
     'eslint.languageOptions.parser': calculated([], () => '@typescript-eslint/parser'),
     'eslint.languageOptions.parserOptions.project': calculated([], () => './tsconfig.json'),
@@ -428,10 +412,8 @@ export default [
     eslintGeneratedFiles: calculated(
       ['eslintConfig'],
       config => config === undefined ? {} : { 'eslint.config.mjs': config },
+      ['generatedFiles'],
     ),
-  }, {
-    toolPackages: ['eslintToolPackages'],
-    generatedFiles: ['eslintGeneratedFiles'],
   })
   return feature('eslint', 'capability', externalValues, module, { lint: true })
 }
@@ -441,7 +423,7 @@ export function typedoc({ title } = {}) {
   const module = calculationModule('typedoc', {
     documentationTitle: external(),
     typedocToolPackages: calculated(['action', 'typedocActions'], (action, actions) =>
-      hasAction(actions, action) ? ['typedoc'] : []),
+      hasAction(actions, action) ? ['typedoc'] : [], ['toolPackages']),
     'typedoc.entryPoints': calculated(['sourceEntry'], entry => [entry]),
     'typedoc.name': calculated(
       ['documentationTitle', 'name'],
@@ -475,10 +457,8 @@ export function typedoc({ title } = {}) {
     typedocGeneratedFiles: calculated(
       ['typedocConfig'],
       config => config === undefined ? {} : { 'typedoc.json': config },
+      ['generatedFiles'],
     ),
-  }, {
-    toolPackages: ['typedocToolPackages'],
-    generatedFiles: ['typedocGeneratedFiles'],
   })
   return feature('typedoc', 'capability', externalValues, module, { docs: true })
 }

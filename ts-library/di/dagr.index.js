@@ -1,4 +1,4 @@
-const DI_COMMIT = 'b13d060f0a6708bac41486708fd713e7de7582d7'
+const DI_COMMIT = 'f6f8fe26837630122dc65df0026b91a32a1d53fa'
 
 export default {
   '/': {

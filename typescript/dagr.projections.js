@@ -182,6 +182,19 @@ const dependencyEntries = (name, scope, deps, versions, dependencyLocations, run
 const contributionValues = contributions => Reflect.ownKeys(contributions)
   .map(name => contributions[name])
 
+const mergeTargets = contributions => {
+  const targets = {}
+  for (const contribution of contributions) {
+    if (contribution === undefined) continue
+    const key = `${contribution.facet}:${contribution.name}`
+    if (Object.hasOwn(targets, key)) {
+      throw new Error(`target contribution ${JSON.stringify(key)} has more than one owner`)
+    }
+    targets[key] = contribution
+  }
+  return targets
+}
+
 function aggregateModule() {
   return calculationModule('feature-contributions', {
     featureToolPackages: calculated(
@@ -203,6 +216,14 @@ function aggregateModule() {
     featureAllowBuilds: calculated(
       [{ tag: 'allowBuilds' }],
       contributions => unique(contributionValues(contributions)),
+    ),
+    featureTargets: calculated(
+      [{ tag: 'targets' }],
+      contributions => mergeTargets(contributionValues(contributions)),
+    ),
+    featureValidations: calculated(
+      [{ tag: 'validations' }],
+      contributions => contributionValues(contributions),
     ),
   })
 }
@@ -456,11 +477,11 @@ const projectionModule = calculationModule('tool-projections', {
     [
       'target', 'action', 'name', 'slug', 'packageJson', 'tsconfig', 'files', 'output',
       'allowBuilds', 'buildAssets', 'sourceLayout', 'sourceSet', 'runtimeEntry',
-      'declarationEntry', 'emittedArtifacts',
+      'declarationEntry', 'emittedArtifacts', 'featureTargets', 'featureValidations',
     ],
     (selectedTarget, action, name, slug, packageJson, tsconfig, files, output,
       allowBuilds, buildAssets, sourceLayout, sourceSet, runtimeEntry, declarationEntry,
-      emittedArtifacts) => ({
+      emittedArtifacts, targets, _validations) => ({
       target: selectedTarget,
       action,
       name,
@@ -471,16 +492,13 @@ const projectionModule = calculationModule('tool-projections', {
       output,
       allowBuilds,
       buildAssets,
+      targets,
       semantics: { sourceLayout, sourceSet, outputLayout: output, runtimeEntry, declarationEntry, emittedArtifacts },
     }),
   ),
 })
 
 function validateFeatures(features) {
-  const archetypes = features.filter(feature => feature.role === 'archetype')
-  if (archetypes.length !== 1) {
-    throw new Error(`A TypeScript stack needs exactly one archetype, got ${archetypes.length}`)
-  }
   const duplicate = features.find((feature, index) => features.findIndex(other => other.name === feature.name) !== index)
   if (duplicate) throw new Error(`TypeScript stack feature ${JSON.stringify(duplicate.name)} was added more than once`)
 }

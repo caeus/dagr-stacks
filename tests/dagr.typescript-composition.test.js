@@ -3,10 +3,14 @@ import { describe, it } from 'node:test'
 
 import di from '../di/dagr.di.js'
 import {
+  biome,
   cloudflareWorker,
+  defineFeature,
   eslint,
   library,
   prettier,
+  requires,
+  setting,
   typedoc,
   viteReact,
   vitest,
@@ -14,6 +18,7 @@ import {
 import { typescriptProjector } from '../typescript/dagr.projections.js'
 
 const versions = {
+  '@biomejs/biome': '2',
   '@cloudflare/workers-types': '4',
   '@eslint/js': '9',
   '@tailwindcss/vite': '4',
@@ -63,6 +68,8 @@ describe('composable TypeScript projections', () => {
     ]
     const { graph, project } = projector(features)
 
+    assert.equal(features[0].role, undefined)
+    assert.equal(features[0].execution, undefined)
     assert.equal(graph.owners.moduleKind, 'library')
     assert.equal(graph.owners.outputDirectory, 'typescript-conventions')
     assert.equal(graph.nodes.outputDirectory.kind, 'calculated')
@@ -88,6 +95,10 @@ describe('composable TypeScript projections', () => {
     assert.deepEqual(graph.nodes.featureGeneratedFiles.deps, [{ tag: 'generatedFiles' }])
     assert.deepEqual(graph.nodes.featureAmbientTypes.deps, [{ tag: 'ambientTypes' }])
     assert.deepEqual(graph.nodes.featureAllowBuilds.deps, [{ tag: 'allowBuilds' }])
+    assert.deepEqual(graph.nodes.featureTargets.deps, [{ tag: 'targets' }])
+    assert.deepEqual(graph.nodes.featureValidations.deps, [{ tag: 'validations' }])
+    assert.deepEqual(graph.nodes.libraryBuildTarget.deps, [{ tag: 'buildDependencies' }])
+    assert.deepEqual(graph.nodes.vitestTestTarget.tags, ['targets', 'buildDependencies'])
     assert.equal(graph.nodes.libraryTsconfig, undefined)
     assert.equal(graph.nodes.featurePackageFields, undefined)
     assert.equal(graph.contributions, undefined)
@@ -227,6 +238,43 @@ describe('composable TypeScript projections', () => {
     assert.match(dev.files['vitest.config.ts'], /environment: "jsdom"/)
     assert.deepEqual(build.buildAssets, ['index.html', 'public'])
     assert.deepEqual(build.output, { directory: 'dist' })
+  })
+
+  it('lets an ordinary feature contribute Biome settings, files, packages, and targets', () => {
+    const { graph, project } = projector([library(), biome()])
+    const dev = project('dev:sync')
+
+    assert.equal(graph.owners.biomeConfig, 'biome')
+    assert.deepEqual(graph.nodes.biomeToolPackages.tags, ['toolPackages'])
+    assert.deepEqual(graph.nodes.biomeGeneratedFiles.tags, ['generatedFiles'])
+    assert.deepEqual(graph.nodes.biomeLintTarget.tags, ['targets', 'buildDependencies'])
+    assert.equal(dev.packageJson.devDependencies['@biomejs/biome'], '2')
+    assert.deepEqual(dev.files['biome.json'], {
+      formatter: { enabled: true },
+      linter: { enabled: true },
+    })
+    assert.equal(dev.targets['ci:lint'].command, 'pnpm exec biome check .')
+    assert.deepEqual(dev.targets['ci:build'].deps, ['ci:lint'])
+  })
+
+  it('lets features extend ESLint rules through settings and fails without ESLint', () => {
+    const companyRules = defineFeature('company-eslint-rules', {
+      settings: {
+        companyEslintRequirement: requires('eslint.enabled'),
+        companyEslintRules: setting(
+          [],
+          () => ({ '@typescript-eslint/consistent-type-imports': 'error' }),
+          { tags: ['eslint.ruleSets'] },
+        ),
+      },
+    })
+
+    const lint = projector([library(), eslint(), companyRules]).project('ci:lint')
+    assert.match(lint.files['eslint.config.mjs'], /consistent-type-imports/)
+    assert.throws(
+      () => projector([library(), companyRules]).project('dev:sync'),
+      /Missing binding "eslint.enabled" required by "companyEslintRequirement"/,
+    )
   })
 
   it('rejects derived package fields disguised as metadata', () => {

@@ -26,12 +26,6 @@ function createStack(options, features, declaration) {
     ignore = RECOMMENDED_IGNORE,
     transform = index => index,
   } = options
-  const archetypes = features.filter(feature => feature.role === 'archetype')
-  if (archetypes.length !== 1) {
-    throw new Error(`A TypeScript stack needs exactly one archetype, got ${archetypes.length}`)
-  }
-  const archetype = archetypes[0]
-  const execution = Object.assign({}, ...features.map(feature => feature.execution))
   const { location, version = '0.1.0', deps = [], metadata = {} } = declaration
   const localDeps = deps.filter(dependency => 'pkg' in dependency)
   const packTarget = dependency => `${dependency.pkg}:ci:pack`
@@ -46,7 +40,21 @@ function createStack(options, features, declaration) {
     features,
     conventions,
   })
-  const { name, slug } = project('dev:sync')
+  const dev = project('dev:sync')
+  const { name, slug } = dev
+  const unorderedTargets = Object.values(dev.targets)
+  const targetName = target => `${target.facet}:${target.name}`
+  const dependenciesIn = (target, candidates) => candidates
+    .filter(candidate => target.deps.includes(targetName(candidate)))
+
+  const targets = []
+  const remainingTargets = [...unorderedTargets]
+  while (remainingTargets.length > 0) {
+    const next = remainingTargets.findIndex(target =>
+      dependenciesIn(target, unorderedTargets).every(dependency => targets.includes(dependency)))
+    if (next === -1) throw new Error('Circular TypeScript target dependencies')
+    targets.push(remainingTargets.splice(next, 1)[0])
+  }
 
   const configuration = target => {
     const projection = project(target)
@@ -87,46 +95,29 @@ function createStack(options, features, declaration) {
     },
   })
 
-  const check = (action, command) => ({
-    deps: [`install-${action}`],
+  const dependenciesOf = target => dependenciesIn(target, targets)
+    .map(candidate => candidate.name)
+
+  const command = target => ({
+    deps: [`install-${target.name}`, ...dependenciesOf(target)],
     run: ({ images }) => {
-      const projection = project(`ci:${action}`)
+      const projection = project(targetName(target))
       return {
-        FROM: images[`install-${action}`],
+        FROM: images[`install-${target.name}`],
         steps: [
           copySource(projection.semantics.sourceLayout.directory),
+          ...(target.assets ? copyAssets(projection.buildAssets) : []),
           { WORKDIR: '/repo' },
-          { RUN: command },
+          { RUN: target.command },
         ],
         IGNORE: ignore,
+        ...(target.export ? { EXPORT: target.export } : {}),
       }
     },
   })
 
-  const qualityTargets = [
-    ...(execution.lint ? ['lint'] : []),
-    ...(execution.test ? ['test'] : []),
-  ]
-
-  const build = execution.build && {
-    deps: ['install-build', ...qualityTargets],
-    run: ({ images }) => {
-      const projection = project('ci:build')
-      return {
-        FROM: images['install-build'],
-        steps: [
-          copySource(projection.semantics.sourceLayout.directory),
-          ...copyAssets(projection.buildAssets),
-          { WORKDIR: '/repo' },
-          { RUN: execution.build === 'vite' ? 'pnpm exec vite build' : 'pnpm exec tsc' },
-        ],
-        IGNORE: ignore,
-      }
-    },
-  }
-
   const pack = target => ({
-    deps: ['build', ...packTargets],
+    deps: [...dependenciesOf(target), ...packTargets],
     run: ({ images }) => ({
       FROM: images.build,
       steps: [
@@ -134,23 +125,50 @@ function createStack(options, features, declaration) {
           COPY: { from: images[packTarget(dependency)], src: '/out', dest: '/out' },
         })),
         { WORKDIR: '/repo' },
-        writeJson('/repo/package.json', project(target).packageJson),
+        writeJson('/repo/package.json', project(targetName(target)).packageJson),
         { RUN: `mkdir -p /tmp/pack /out && pnpm pack --pack-destination /tmp/pack && mv /tmp/pack/*.tgz /out/${slug}.tgz` },
       ],
       IGNORE: ignore,
     }),
   })
 
+  const devInstall = () => ({
+    deps: ['config:dev', ...packTargets],
+    run: ({ images, host }) => {
+      const projection = project('config:dev')
+      return {
+        FROM: images['config:dev'],
+        steps: [
+          ...localDeps.map(dependency => ({
+            COPY: { from: images[packTarget(dependency)], src: '/out', dest: '/repo' },
+          })),
+          { WORKDIR: '/repo' },
+          writeText('/repo/.pnpmfile.cjs', pnpmfile(scope)),
+          ...(projection.allowBuilds.length > 0
+            ? [writeYaml('/repo/pnpm-workspace.yaml', {
+                allowBuilds: Object.fromEntries(projection.allowBuilds.map(pkg => [pkg, true])),
+              })]
+            : []),
+          { RUN: `pnpm install --prod=false --os ${host.os} --cpu ${host.arch}` },
+        ],
+        IGNORE: ignore,
+        EXPORT: { '/repo/node_modules': 'node_modules' },
+      }
+    },
+  })
+
+  const materialize = target => {
+    if (target.kind === 'command') return command(target)
+    if (target.kind === 'pack') return pack(target)
+    if (target.kind === 'dev-install') return devInstall(target)
+    throw new Error(`Unknown TypeScript target kind ${JSON.stringify(target.kind)}`)
+  }
+
   const configActions = [
     'dev',
-    ...(execution.typecheck ? ['typecheck'] : []),
-    ...(execution.test ? ['test'] : []),
-    ...(execution.lint ? ['lint'] : []),
-    ...(execution.docs ? ['docs'] : []),
-    ...(execution.build ? ['build'] : []),
+    ...new Set(targets.filter(target => target.kind === 'command').map(target => target.name)),
   ]
   const installActions = configActions.filter(action => action !== 'dev')
-  const dev = project('dev:sync')
   const index = {
     config: Object.fromEntries(configActions.map(action => [action, configuration(`config:${action}`)])),
     dev: {
@@ -163,64 +181,18 @@ function createStack(options, features, declaration) {
           EXPORT: Object.fromEntries(Object.keys(dev.files).map(path => [`/repo/${path}`, path])),
         }),
       },
-      ...(execution.devInstall
-        ? {
-            install: {
-              deps: ['config:dev', ...packTargets],
-              run: ({ images, host }) => {
-                const projection = project('config:dev')
-                return {
-                  FROM: images['config:dev'],
-                  steps: [
-                    ...localDeps.map(dependency => ({
-                      COPY: { from: images[packTarget(dependency)], src: '/out', dest: '/repo' },
-                    })),
-                    { WORKDIR: '/repo' },
-                    writeText('/repo/.pnpmfile.cjs', pnpmfile(scope)),
-                    ...(projection.allowBuilds.length > 0
-                      ? [writeYaml('/repo/pnpm-workspace.yaml', {
-                          allowBuilds: Object.fromEntries(projection.allowBuilds.map(pkg => [pkg, true])),
-                        })]
-                      : []),
-                    { RUN: `pnpm install --prod=false --os ${host.os} --cpu ${host.arch}` },
-                  ],
-                  IGNORE: ignore,
-                  EXPORT: { '/repo/node_modules': 'node_modules' },
-                }
-              },
-            },
-          }
-        : {}),
     },
     ci: {
       ...Object.fromEntries(installActions.map(action => [`install-${action}`, install(action)])),
-      ...(execution.typecheck ? { typecheck: check('typecheck', 'pnpm exec tsc --noEmit') } : {}),
-      ...(execution.test ? { test: check('test', 'pnpm exec vitest run') } : {}),
-      ...(execution.lint ? { lint: check('lint', 'pnpm exec eslint .') } : {}),
-      ...(build ? { build } : {}),
-      ...(execution.docs
-        ? {
-            docs: {
-              deps: ['install-docs'],
-              run: ({ images }) => {
-                const projection = project('ci:docs')
-                return {
-                  FROM: images['install-docs'],
-                  steps: [
-                    copySource(projection.semantics.sourceLayout.directory),
-                    { WORKDIR: '/repo' },
-                    { RUN: 'pnpm exec typedoc' },
-                  ],
-                  IGNORE: ignore,
-                  EXPORT: { '/repo/docs/': 'docs/' },
-                }
-              },
-            },
-          }
-        : {}),
-      ...(execution.pack ? { pack: pack('ci:pack') } : {}),
     },
-    ...(execution.pack ? { publish: { pack: pack('publish:pack') } } : {}),
+  }
+
+  for (const target of targets) {
+    index[target.facet] ??= {}
+    if (Object.hasOwn(index[target.facet], target.name)) {
+      throw new Error(`TypeScript target ${JSON.stringify(targetName(target))} already exists`)
+    }
+    index[target.facet][target.name] = materialize(target)
   }
 
   return transform(index, {
@@ -230,7 +202,6 @@ function createStack(options, features, declaration) {
     project,
     calculations: graph,
     features,
-    archetype,
   })
 }
 

@@ -83,7 +83,7 @@ intentionally left for later.
 
 ## DI keys
 
-Keys are plain JavaScript strings. The exact graph depends on the selected archetype and
+Keys are plain JavaScript strings. The exact graph depends on the selected product feature and
 capabilities. Only the convention keys are accepted by `typescript({ conventions })`; the remaining
 keys describe the internal calculation graph and are available to transforms through
 `calculations.nodes`.
@@ -107,7 +107,7 @@ typescript({
 | External package facts | `location`, `scope`, `version`, `deps`, `metadata`, `versions` |
 | Selected context | `target` |
 | Semantic calculations | `action`, `name`, `slug`, `validatedMetadata`, `sourceLayout`, `sourceEntry`, `outputLayout`, `distributionIntent`, `emissionIntent`, `testSourcesIncluded`, `sourceSet`, `runtimeEntry`, `declarationEntry`, `emittedArtifacts`, `publishable`, `sourceMapEmission`, `ambientTypes` |
-| Feature aggregates | `featureToolPackages`, `featureRuntimePackages`, `featureAmbientTypes`, `featureGeneratedFiles`, `featureAllowBuilds` |
+| Feature aggregates | `featureToolPackages`, `featureRuntimePackages`, `featureAmbientTypes`, `featureGeneratedFiles`, `featureAllowBuilds`, `featureTargets`, `featureValidations` |
 
 ### Package and TypeScript projections
 
@@ -120,14 +120,14 @@ typescript({
 | TypeScript assembly | `compilerOptions`, `tsconfig` |
 | Final projection | `files`, `allowBuilds`, `output`, `projection` |
 
-### Archetype keys
+### Product keys
 
-Every archetype provides the same tool-neutral contract:
+Every product feature provides the same tool-neutral contract:
 
 | Kind | Keys |
 | --- | --- |
-| Archetype facts | `productKind`, `runtimeKind`, `languageTarget`, `sourceMapIntent`, `buildAssetInputs` |
-| Archetype calculations | `moduleKind`, `moduleResolutionKind`, `standardLibraries`, `baseAmbientTypes`, `sourceAlias`, `archetypeToolPackages`, `archetypeRuntimePackages`, `archetypeAllowBuilds`, `buildAssets` |
+| Product facts | `productKind`, `runtimeKind`, `languageTarget`, `sourceMapIntent`, `buildAssetInputs` |
+| Product calculations | `moduleKind`, `moduleResolutionKind`, `standardLibraries`, `baseAmbientTypes`, `sourceAlias`, `productToolPackages`, `productRuntimePackages`, `productAllowBuilds`, `buildAssets` |
 | Additional `viteReact()` keys | `vite.plugins`, `vite.resolve.alias`, `viteConfig`, `viteGeneratedFiles` |
 
 ### Capability keys
@@ -135,24 +135,69 @@ Every archetype provides the same tool-neutral contract:
 | Capability | Keys |
 | --- | --- |
 | `prettier()` | `formatSemicolons`, `formatTabWidth`, `formatSingleQuotes`, `formatPrintWidth`, `formatTrailingCommas`, `prettierToolPackages`, `prettier.$schema`, `prettier.semi`, `prettier.tabWidth`, `prettier.singleQuote`, `prettier.printWidth`, `prettier.trailingComma`, `prettierConfig`, `prettierGeneratedFiles` |
+| `biome()` | `biomeFormatterIntent`, `biomeLinterIntent`, `biomeActions`, `biomeToolPackages`, `biome.formatter.enabled`, `biome.linter.enabled`, `biomeConfig`, `biomeGeneratedFiles`, `biomeLintTarget` |
 | `vitest()` | `testEnvironment`, `testGlobalsIntent`, `testTypecheckIntent`, `vitestToolPackages`, `vitestAmbientTypes`, `vitest.test.environment`, `vitest.test.globals`, `vitest.test.typecheck.enabled`, `vitest.test.exclude`, `vitest.test.root`, `vitestConfig`, `vitestGeneratedFiles`, `vitestAllowBuilds` |
 | `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles` |
 | `typedoc()` | `documentationTitle`, `typedocToolPackages`, `typedoc.entryPoints`, `typedoc.name`, `typedoc.includeVersion`, `typedoc.excludeExternals`, `typedoc.excludePrivate`, `typedoc.excludeProtected`, `typedoc.exclude`, `typedocConfig`, `typedocGeneratedFiles` |
 
-## Archetypes
+## Authoring features
 
-Exactly one archetype is required:
+`defineFeature()` is the public authoring boundary. Inputs become external DAG nodes; settings are
+ordinary calculations with explicit dependencies and optional contribution tags:
+
+```js
+import { defineFeature, requires, setting, target } from '//stacks/ts//dagr.stack.js'
+
+export const companyEslintRules = rules => defineFeature('company-eslint-rules', {
+  settings: {
+    companyEslintRequirement: requires('eslint.enabled'),
+    companyEslintRules: setting(
+      [],
+      () => rules,
+      { tags: ['eslint.ruleSets'] },
+    ),
+  },
+})
+```
+
+The requirement is a DAG dependency, not a dependency on the `eslint()` feature object. It is always
+validated by the final projection, so using `companyEslintRules()` without `eslint()` fails with the
+missing `eslint.enabled` setting.
+
+Targets are ordinary tagged setting values:
+
+```js
+biomeLintTarget: setting(
+  ['biomeLinterIntent'],
+  enabled => enabled
+    ? target('ci:lint', {
+        command: 'pnpm exec biome check .',
+      })
+    : undefined,
+  { tags: ['targets', 'buildDependencies'] },
+)
+```
+
+There is no feature role or execution registry. Product selection, extension requirements, generated
+files, and executable targets are all represented by calculation nodes and edges.
+
+## Products
+
+Exactly one product feature must satisfy the product setting contract. Missing providers fail as
+missing DAG bindings; selecting two product features fails because they both own the same settings.
+Products are explicit features, not conventions or implicit defaults.
 
 - `library()` derives TypeScript build output, package entry points, tarballs, and publishability.
 - `cloudflareWorker()` derives the worker runtime, compiler, package imports, and typecheck target.
 - `viteReact()` derives the browser compiler, Vite build, React runtime, and host install target.
 
-Archetypes express what is being built. They do not expose `rootDir`, `outDir`, package `files`, or
+Product features express what is being built. They do not expose `rootDir`, `outDir`, package `files`, or
 other values that only exist to make tools agree.
 
 ## Capabilities
 
 - `prettier()` adds formatting policy and the development projection.
+- `biome()` adds Biome formatting/linting policy, generated configuration, and `ci:lint`.
 - `vitest()` adds test-runtime intent, generated configuration, and `ci:test`.
 - `eslint()` adds lint policy, generated configuration, and `ci:lint`.
 - `typedoc()` adds documentation intent, generated configuration, and `ci:docs`.
@@ -167,6 +212,10 @@ contributions use DI tags instead of a parallel contribution registry:
 | `ambientTypes` | `featureAmbientTypes` |
 | `generatedFiles` | `featureGeneratedFiles` |
 | `allowBuilds` | `featureAllowBuilds` |
+| `targets` | `featureTargets` |
+| `validations` | `featureValidations` |
+| `buildDependencies` | The selected product's build-target setting |
+| `eslint.ruleSets` | `eslintRules` |
 
 Each contributing node carries its tags in the calculation graph. Each collector has a `{ tag }`
 dependency and receives a record keyed by the contributing node names. Adding a capability therefore

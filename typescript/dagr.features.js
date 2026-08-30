@@ -12,15 +12,67 @@ const calculationModule = (name, nodes) => Object.freeze({
   nodes: Object.freeze({ ...nodes }),
 })
 
-const feature = (name, role, externalValues, module, execution = {}) => Object.freeze({
+const feature = (name, externalValues, module) => Object.freeze({
   name,
-  role,
   externalValues: Object.freeze({ ...externalValues }),
   module,
-  execution: Object.freeze({ ...execution }),
 })
 
+export const setting = (deps, factory, { tags = [] } = {}) => calculated(deps, factory, tags)
+
+export const value = (entry, options) => setting([], () => entry, options)
+
+export const requires = (...dependencies) => setting(
+  dependencies,
+  () => true,
+  { tags: ['validations'] },
+)
+
+export function target(name, { kind = 'command', deps = [], ...options } = {}) {
+  const separator = name.indexOf(':')
+  if (separator <= 0 || separator === name.length - 1) {
+    throw new Error(`TypeScript feature target must be facet:name, got ${JSON.stringify(name)}`)
+  }
+  return Object.freeze({
+    facet: name.slice(0, separator),
+    name: name.slice(separator + 1),
+    kind,
+    ...options,
+    deps: Object.freeze([...deps]),
+  })
+}
+
+export function defineFeature(name, { inputs = {}, settings = {} } = {}) {
+  if (!name) throw new Error('TypeScript feature needs a name')
+  const conflicts = Object.keys(inputs).filter(key => Object.hasOwn(settings, key))
+  if (conflicts.length > 0) {
+    throw new Error(`TypeScript feature ${JSON.stringify(name)} declares ${conflicts.join(', ')} as both input and setting`)
+  }
+  return feature(name, inputs, calculationModule(name, {
+    ...Object.fromEntries(Object.keys(inputs).map(key => [key, external()])),
+    ...settings,
+  }))
+}
+
 const hasAction = (actions, action) => actions.includes(action)
+
+const contributedTargetNames = contributions => Reflect.ownKeys(contributions)
+  .map(name => contributions[name])
+  .filter(target => target !== undefined)
+  .map(target => `${target.facet}:${target.name}`)
+
+const mergeRecords = (label, records) => {
+  const result = {}
+  for (const record of records) {
+    for (const [key, entry] of Object.entries(record)) {
+      if (Object.hasOwn(result, key)) {
+        throw new Error(`${label} ${JSON.stringify(key)} has more than one owner`)
+      }
+      result[key] = entry
+    }
+  }
+  return result
+}
 
 export function library({
   runtime = 'portable',
@@ -56,22 +108,42 @@ export function library({
       ['ambientTypes'],
     ),
     sourceAlias: calculated([], () => undefined),
-    archetypeToolPackages: calculated(
+    productToolPackages: calculated(
       ['action', 'developmentActions', 'runtimeKind'],
       (action, actions, runtime) => hasAction(actions, action)
         ? ['@tsconfig/strictest', ...(runtime === 'node' ? ['@types/node'] : []), 'typescript']
         : [],
       ['toolPackages'],
     ),
-    archetypeRuntimePackages: calculated([], () => [], ['runtimePackages']),
-    archetypeAllowBuilds: calculated([], () => [], ['allowBuilds']),
+    productRuntimePackages: calculated([], () => [], ['runtimePackages']),
+    productAllowBuilds: calculated([], () => [], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
+    libraryTypecheckTarget: calculated(
+      [],
+      () => target('ci:typecheck', { command: 'pnpm exec tsc --noEmit' }),
+      ['targets'],
+    ),
+    libraryBuildTarget: calculated(
+      [{ tag: 'buildDependencies' }],
+      dependencies => target('ci:build', {
+        command: 'pnpm exec tsc',
+        assets: true,
+        deps: contributedTargetNames(dependencies),
+      }),
+      ['targets'],
+    ),
+    libraryCiPackTarget: calculated(
+      [],
+      () => target('ci:pack', { kind: 'pack', deps: ['ci:build'] }),
+      ['targets'],
+    ),
+    libraryPublishPackTarget: calculated(
+      [],
+      () => target('publish:pack', { kind: 'pack', deps: ['ci:build'] }),
+      ['targets'],
+    ),
   })
-  return feature('library', 'archetype', externalValues, module, {
-    typecheck: true,
-    build: 'tsc',
-    pack: true,
-  })
+  return feature('library', externalValues, module)
 }
 
 export function cloudflareWorker({ language = 'ES2022' } = {}) {
@@ -96,15 +168,20 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
     ),
-    archetypeToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
+    productToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
       hasAction(actions, action)
         ? ['@tsconfig/strictest', '@cloudflare/workers-types', 'typescript', 'wrangler']
         : [], ['toolPackages']),
-    archetypeRuntimePackages: calculated([], () => [], ['runtimePackages']),
-    archetypeAllowBuilds: calculated([], () => ['sharp', 'workerd'], ['allowBuilds']),
+    productRuntimePackages: calculated([], () => [], ['runtimePackages']),
+    productAllowBuilds: calculated([], () => ['sharp', 'workerd'], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
+    cloudflareTypecheckTarget: calculated(
+      [],
+      () => target('ci:typecheck', { command: 'pnpm exec tsc --noEmit' }),
+      ['targets'],
+    ),
   })
-  return feature('cloudflare-worker', 'archetype', externalValues, module, { typecheck: true })
+  return feature('cloudflare-worker', externalValues, module)
 }
 
 const viteRuntimePackages = Object.freeze([
@@ -141,12 +218,12 @@ export function viteReact({ language = 'ES2020' } = {}) {
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
     ),
-    archetypeToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
+    productToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
       hasAction(actions, action)
         ? ['@tsconfig/strictest', '@types/node', '@types/react', '@types/react-dom', 'typescript', 'vite']
         : [], ['toolPackages']),
-    archetypeRuntimePackages: calculated([], () => viteRuntimePackages, ['runtimePackages']),
-    archetypeAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
+    productRuntimePackages: calculated([], () => viteRuntimePackages, ['runtimePackages']),
+    productAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
     'vite.plugins': calculated([], () => ['react', 'tailwindcss']),
     'vite.resolve.alias': calculated(
@@ -173,12 +250,23 @@ export default defineConfig({
       config => config === undefined ? {} : { 'vite.config.ts': config },
       ['generatedFiles'],
     ),
+    viteTypecheckTarget: calculated(
+      [],
+      () => target('ci:typecheck', { command: 'pnpm exec tsc --noEmit' }),
+      ['targets'],
+    ),
+    viteBuildTarget: calculated(
+      [{ tag: 'buildDependencies' }],
+      dependencies => target('ci:build', {
+        command: 'pnpm exec vite build',
+        assets: true,
+        deps: contributedTargetNames(dependencies),
+      }),
+      ['targets'],
+    ),
+    viteDevInstallTarget: calculated([], () => target('dev:install', { kind: 'dev-install' }), ['targets']),
   })
-  return feature('vite-react', 'archetype', externalValues, module, {
-    typecheck: true,
-    build: 'vite',
-    devInstall: true,
-  })
+  return feature('vite-react', externalValues, module)
 }
 
 export function prettier({
@@ -231,7 +319,46 @@ export function prettier({
       ['generatedFiles'],
     ),
   })
-  return feature('prettier', 'capability', externalValues, module)
+  return feature('prettier', externalValues, module)
+}
+
+export function biome({ formatter = true, linter = true } = {}) {
+  return defineFeature('biome', {
+    inputs: {
+      biomeFormatterIntent: formatter,
+      biomeLinterIntent: linter,
+    },
+    settings: {
+      biomeActions: value(Object.freeze(['dev', 'lint'])),
+      biomeToolPackages: setting(
+        ['action', 'biomeActions'],
+        (action, actions) => hasAction(actions, action) ? ['@biomejs/biome'] : [],
+        { tags: ['toolPackages'] },
+      ),
+      'biome.formatter.enabled': setting(['biomeFormatterIntent'], enabled => enabled),
+      'biome.linter.enabled': setting(['biomeLinterIntent'], enabled => enabled),
+      biomeConfig: setting(
+        ['action', 'biomeActions', 'biome.formatter.enabled', 'biome.linter.enabled'],
+        (action, actions, formatterEnabled, linterEnabled) => hasAction(actions, action)
+          ? { formatter: { enabled: formatterEnabled }, linter: { enabled: linterEnabled } }
+          : undefined,
+      ),
+      biomeGeneratedFiles: setting(
+        ['biomeConfig'],
+        config => config === undefined ? {} : { 'biome.json': config },
+        { tags: ['generatedFiles'] },
+      ),
+      biomeLintTarget: setting(
+        ['biomeLinterIntent'],
+        enabled => enabled
+          ? target('ci:lint', {
+              command: 'pnpm exec biome check .',
+            })
+          : undefined,
+        { tags: ['targets', 'buildDependencies'] },
+      ),
+    },
+  })
 }
 
 export function vitest({ environment = 'node', globals = false, typecheck = false } = {}) {
@@ -244,6 +371,7 @@ export function vitest({ environment = 'node', globals = false, typecheck = fals
     testEnvironment: external(),
     testGlobalsIntent: external(),
     testTypecheckIntent: external(),
+    ...(environment === 'jsdom' ? { vitestViteRequirement: requires('viteConfig') } : {}),
     vitestToolPackages: calculated(['action', 'vitestDependencyActions', 'testEnvironment'], (action, actions, env) =>
       hasAction(actions, action) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : [], ['toolPackages']),
     vitestAmbientTypes: calculated(
@@ -302,8 +430,15 @@ export default defineConfig({ test: {
       ['generatedFiles'],
     ),
     vitestAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
+    vitestTestTarget: calculated(
+      [],
+      () => target('ci:test', {
+        command: 'pnpm exec vitest run',
+      }),
+      ['targets', 'buildDependencies'],
+    ),
   })
-  return feature('vitest', 'capability', externalValues, module, { test: true })
+  return feature('vitest', externalValues, module)
 }
 
 export function eslint({ prettier: enforceFormatting = false, explicitReturnTypes = false } = {}) {
@@ -314,6 +449,7 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
   const module = calculationModule('eslint', {
     lintFormattingIntent: external(),
     lintExplicitReturnTypesIntent: external(),
+    'eslint.enabled': calculated([], () => true),
     eslintToolPackages: calculated(
       ['action', 'eslintActions', 'lintFormattingIntent'],
       (action, actions, formatting) => hasAction(actions, action)
@@ -364,16 +500,21 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
         'eslint.rules.@typescript-eslint/no-unused-vars',
         'eslint.rules.@typescript-eslint/explicit-function-return-type',
         'eslint.rules.prettier/prettier',
+        { tag: 'eslint.ruleSets' },
       ],
-      (noUndef, noRedeclare, noDupeClassMembers, emptyObject, unused, returns, formatting) => ({
-        'no-undef': noUndef,
-        'no-redeclare': noRedeclare,
-        'no-dupe-class-members': noDupeClassMembers,
-        '@typescript-eslint/no-empty-object-type': emptyObject,
-        '@typescript-eslint/no-unused-vars': unused,
-        ...(returns === undefined ? {} : { '@typescript-eslint/explicit-function-return-type': returns }),
-        ...(formatting === undefined ? {} : { 'prettier/prettier': formatting }),
-      }),
+      (noUndef, noRedeclare, noDupeClassMembers, emptyObject, unused, returns, formatting, extensions) =>
+        mergeRecords('ESLint rule', [
+          {
+            'no-undef': noUndef,
+            'no-redeclare': noRedeclare,
+            'no-dupe-class-members': noDupeClassMembers,
+            '@typescript-eslint/no-empty-object-type': emptyObject,
+            '@typescript-eslint/no-unused-vars': unused,
+            ...(returns === undefined ? {} : { '@typescript-eslint/explicit-function-return-type': returns }),
+            ...(formatting === undefined ? {} : { 'prettier/prettier': formatting }),
+          },
+          ...Reflect.ownKeys(extensions).map(name => extensions[name]),
+        ]),
     ),
     eslintConfig: calculated(
       [
@@ -414,8 +555,15 @@ export default [
       config => config === undefined ? {} : { 'eslint.config.mjs': config },
       ['generatedFiles'],
     ),
+    eslintLintTarget: calculated(
+      [],
+      () => target('ci:lint', {
+        command: 'pnpm exec eslint .',
+      }),
+      ['targets', 'buildDependencies'],
+    ),
   })
-  return feature('eslint', 'capability', externalValues, module, { lint: true })
+  return feature('eslint', externalValues, module)
 }
 
 export function typedoc({ title } = {}) {
@@ -459,6 +607,14 @@ export function typedoc({ title } = {}) {
       config => config === undefined ? {} : { 'typedoc.json': config },
       ['generatedFiles'],
     ),
+    typedocDocsTarget: calculated(
+      [],
+      () => target('ci:docs', {
+        command: 'pnpm exec typedoc',
+        export: { '/repo/docs/': 'docs/' },
+      }),
+      ['targets'],
+    ),
   })
-  return feature('typedoc', 'capability', externalValues, module, { docs: true })
+  return feature('typedoc', externalValues, module)
 }

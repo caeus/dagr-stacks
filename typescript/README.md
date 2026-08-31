@@ -154,53 +154,45 @@ Every product feature provides the same tool-neutral contract:
 
 ## Authoring features
 
-`defineFeature()` is the public authoring boundary. Inputs become external DAG nodes; settings are
-ordinary calculations with explicit dependencies and optional contribution tags:
+Features are ordinary functions returning native DI modules. Inputs use `di.toValue()`; calculated
+settings use `di.toFun()` with explicit dependencies and optional contribution tags:
 
 - A setting definition is `{ deps, factory, tags }`.
 - A target value is `{ name, deps, run }`.
 - A facet is `{ name, targets }`, where `targets` is that facet's collection tag.
-- A feature is `{ name, inputs, settings, targets, facets }`; its definitions are merged into the native DI module.
+- A feature is a native DI module. `.with(feature)` calls `module.merge(feature)`.
 
 ```js
-import { defineFeature, requires, setting, target } from '//stacks/ts//dagr.stack.js'
+import { di } from '//stacks/ts//dagr.stack.js'
 
-export const companyEslintRules = rules => defineFeature('company-eslint-rules', {
-  settings: {
-    companyEslintRequirement: requires('eslint.enabled'),
-    companyEslintRules: setting(
-      [],
-      () => rules,
-      { tags: ['eslint.ruleSets'] },
-    ),
-  },
+export const companyEslintRules = rules => di.module({
+  companyEslintRequirement: di.toFun(['eslint.enabled'], () => true, ['validations']),
+  companyEslintRules: di.toValue(rules, ['eslint.ruleSets']),
 })
 ```
 
-The requirement is a DAG dependency, not a dependency on the `eslint()` feature object. It is always
+The requirement is a DAG dependency, not a dependency on the `eslint()` feature module. It is always
 validated by the final workspace, so using `companyEslintRules()` without `eslint()` fails with the
 missing `eslint.enabled` setting.
 
 Targets are ordinary tagged setting values and retain Dagr's native shape:
 
 ```js
-import { ciFacet, defineFeature, setting, target } from '//stacks/ts//dagr.stack.js'
+import { ciFacet, di, target } from '//stacks/ts//dagr.stack.js'
 
-export const health = () => defineFeature('health', {
-  settings: {
-    healthTarget: setting(
-      [],
-      () => target('health', {
-        deps: [],
-        run: () => ({
-          FROM: 'alpine:3.22',
-          steps: [{ RUN: 'echo healthy' }],
-          IGNORE: [],
-        }),
+export const health = () => di.module({
+  healthTarget: di.toFun(
+    [],
+    () => target('health', {
+      deps: [],
+      run: () => ({
+        FROM: 'alpine:3.22',
+        steps: [{ RUN: 'echo healthy' }],
+        IGNORE: [],
       }),
-      { tags: [ciFacet.targets] },
-    ),
-  },
+    }),
+    [ciFacet.targets],
+  ),
 })
 ```
 

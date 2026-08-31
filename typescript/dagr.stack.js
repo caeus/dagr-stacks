@@ -3,10 +3,12 @@ import di from '//di//dagr.di.js'
 import { writeJson, writeText, writeYaml } from '//dagr.file_utils.js'
 import { pnpmfile } from '//dagr.utils.js'
 import { RECOMMENDED_IGNORE } from '//dagr.dockerignore.js'
-import { configFacet, devFacet, target } from '//dagr.features.js'
+import { configFacet, devFacet, facetOf, target } from '//dagr.features.js'
 import { typescriptModule } from '//dagr.module.js'
 
 export * from '//dagr.features.js'
+export { typescriptModule, workspaceKey } from '//dagr.module.js'
+export { di }
 
 function writeProjectedFile(path, value) {
   return typeof value === 'string'
@@ -54,7 +56,7 @@ function createStack(options, features, declaration) {
     writeText,
     writeYaml,
   })
-  let module = typescriptModule(di, {
+  let module = typescriptModule({
     location,
     scope,
     version,
@@ -68,7 +70,10 @@ function createStack(options, features, declaration) {
   })
 
   const facets = Object.freeze({
-    ...Object.assign({}, ...features.map(feature => feature.facets)),
+    ...Object.fromEntries([...module.keys()]
+      .map(name => facetOf(module.definitionOf(name)))
+      .filter(Boolean)
+      .map(facet => [facet.name, facet])),
     [configFacet.name]: configFacet,
     [devFacet.name]: devFacet,
   })
@@ -139,18 +144,15 @@ function builder(options, features) {
   const stack = declaration => createStack(options, features, declaration)
   return Object.assign(stack, {
     with(next) {
-      if (!next?.settings || !next?.targets || !next?.name) {
-        throw new Error('with() expects a TypeScript stack feature')
+      if (typeof next?.keys !== 'function' || typeof next?.definitionOf !== 'function') {
+        throw new Error('with() expects a DI module')
       }
-      if (features.some(feature => feature.name === next.name)) {
-        throw new Error(`TypeScript stack feature ${JSON.stringify(next.name)} was added more than once`)
-      }
-      return builder(options, [...features, next])
+      return builder(options, features.merge(next))
     },
-    features: Object.freeze([...features]),
+    features,
   })
 }
 
 export default function typescript(options = {}) {
-  return builder(options, [])
+  return builder(options, di.module({}))
 }

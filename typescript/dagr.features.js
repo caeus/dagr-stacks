@@ -1,3 +1,5 @@
+import di from '//di//dagr.di.js'
+
 const facetsByName = new Map()
 const facetsByTargetTag = new Map()
 
@@ -15,45 +17,21 @@ export const devFacet = facet('dev')
 export const ciFacet = facet('ci')
 export const publishFacet = facet('publish')
 
-export const setting = (deps, factory, { tags = [] } = {}) => ({ deps, factory, tags })
-
-const calculated = (deps, factory, tags = []) => setting(deps, factory, { tags })
-
-const feature = (name, inputs, definitions) => {
-  const settings = {}
-  const targets = {}
-  const facets = {}
-  for (const key of Reflect.ownKeys(definitions)) {
-    const definition = definitions[key]
-    const targetFacets = definition.tags.map(tag => facetsByTargetTag.get(tag)).filter(Boolean)
-    if (targetFacets.length > 1) throw new Error('A target setting cannot belong to multiple facets')
-    if (targetFacets.length === 0) {
-      settings[key] = definition
-      continue
-    }
-    targets[key] = definition
-    facets[targetFacets[0].name] = targetFacets[0]
-  }
-  return Object.freeze({
-    name,
-    inputs: Object.freeze({ ...inputs }),
-    settings: Object.freeze(settings),
-    targets: Object.freeze(targets),
-    facets: Object.freeze(facets),
-  })
+export function facetOf(definition) {
+  const facets = definition.tags.map(tag => facetsByTargetTag.get(tag)).filter(Boolean)
+  if (facets.length > 1) throw new Error('A target setting cannot belong to multiple facets')
+  return facets[0]
 }
 
-export const value = (entry, options) => setting([], () => entry, options)
-
-const versionDefaults = entries => value(
+const versionDefaults = entries => di.toValue(
   Object.freeze({ ...entries }),
-  { tags: ['versionDefaults'] },
+  ['versionDefaults'],
 )
 
-export const requires = (...dependencies) => setting(
+export const requires = (...dependencies) => di.toFun(
   dependencies,
   () => true,
-  { tags: ['validations'] },
+  ['validations'],
 )
 
 export function target(name, { deps = [], run } = {}) {
@@ -64,15 +42,6 @@ export function target(name, { deps = [], run } = {}) {
     deps: Object.freeze([...deps]),
     run,
   })
-}
-
-export function defineFeature(name, { inputs = {}, settings = {} } = {}) {
-  if (!name) throw new Error('TypeScript feature needs a name')
-  const conflicts = Object.keys(inputs).filter(key => Object.hasOwn(settings, key))
-  if (conflicts.length > 0) {
-    throw new Error(`TypeScript feature ${JSON.stringify(name)} declares ${conflicts.join(', ')} as both input and setting`)
-  }
-  return feature(name, inputs, settings)
 }
 
 const hasIntent = (intents, intent) => intents.includes(intent)
@@ -160,17 +129,17 @@ const commandTargets = (prefix, name, command, {
     return isEnabled ? factory(...values) : undefined
   }
   return {
-    [`${prefix}ConfigTarget`]: calculated(
+    [`${prefix}ConfigTarget`]: di.toFun(
       [...enabledDeps, `config:${name}/workspace`, '#dagrRuntime'],
       enabledFactory((workspace, runtime) => configurationTarget(name, workspace, runtime)),
       [configFacet.targets],
     ),
-    [`${prefix}InstallTarget`]: calculated(
+    [`${prefix}InstallTarget`]: di.toFun(
       [...enabledDeps, `config:${name}/workspace`, '#dagrRuntime'],
       enabledFactory((workspace, runtime) => installTarget(name, workspace, runtime)),
       [ciFacet.targets],
     ),
-    [`${prefix}Target`]: calculated(
+    [`${prefix}Target`]: di.toFun(
       [
         ...enabledDeps,
         ...(dependencies ? [{ tag: 'buildDependencies' }] : []),
@@ -247,40 +216,40 @@ export function library({
     buildAssetInputs: Object.freeze([...assets]),
   }
   const settings = {
-    moduleKind: calculated(['runtimeKind'], runtime => runtime === 'node' ? 'NodeNext' : 'ESNext'),
-    moduleResolutionKind: calculated(
+    moduleKind: di.toFun(['runtimeKind'], runtime => runtime === 'node' ? 'NodeNext' : 'ESNext'),
+    moduleResolutionKind: di.toFun(
       ['runtimeKind'],
       runtime => runtime === 'node' ? 'NodeNext' : 'Bundler',
     ),
-    standardLibraries: calculated(['languageTarget'], target => [target]),
-    baseAmbientTypes: calculated(
+    standardLibraries: di.toFun(['languageTarget'], target => [target]),
+    baseAmbientTypes: di.toFun(
       ['runtimeKind'],
       runtime => runtime === 'node' ? ['node'] : [],
       ['ambientTypes'],
     ),
-    sourceAlias: calculated([], () => undefined),
-    productToolPackages: calculated(
+    sourceAlias: di.toFun([], () => undefined),
+    productToolPackages: di.toFun(
       ['intent', 'developmentIntents', 'runtimeKind'],
       (intent, intents, runtime) => hasIntent(intents, intent)
         ? ['@tsconfig/strictest', ...(runtime === 'node' ? ['@types/node'] : []), 'typescript']
         : [],
       ['toolPackages'],
     ),
-    productRuntimePackages: calculated([], () => [], ['runtimePackages']),
-    productAllowBuilds: calculated([], () => [], ['allowBuilds']),
+    productRuntimePackages: di.toFun([], () => [], ['runtimePackages']),
+    productAllowBuilds: di.toFun([], () => [], ['allowBuilds']),
     libraryVersionDefaults: versionDefaults({ '@types/node': '26.2.0' }),
-    buildAssets: calculated(['buildAssetInputs'], assets => assets),
+    buildAssets: di.toFun(['buildAssetInputs'], assets => assets),
     ...commandTargets('libraryTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
     ...commandTargets('libraryBuild', 'build', 'pnpm exec tsc', {
       assets: true,
       dependencies: true,
     }),
-    libraryCiPackTarget: calculated(
+    libraryCiPackTarget: di.toFun(
       ['libraryBuildTarget', 'ci:pack/workspace', '#dagrRuntime'],
       (build, workspace, runtime) => packTarget('pack', workspace, runtime, { build }),
       [ciFacet.targets],
     ),
-    libraryPublishPackTarget: calculated(
+    libraryPublishPackTarget: di.toFun(
       ['libraryBuildTarget', 'publish:pack/workspace', '#dagrRuntime'],
       (build, workspace, runtime) => packTarget('pack', workspace, runtime, { build }, {
         dependencyFacet: ciFacet.name,
@@ -288,7 +257,10 @@ export function library({
       [publishFacet.targets],
     ),
   }
-  return feature('library', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }
 
 export function cloudflareWorker({ language = 'ES2022' } = {}) {
@@ -300,28 +272,31 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
     buildAssetInputs: Object.freeze([]),
   }
   const settings = {
-    moduleKind: calculated([], () => 'NodeNext'),
-    moduleResolutionKind: calculated([], () => 'NodeNext'),
-    standardLibraries: calculated(['languageTarget'], target => [target]),
-    baseAmbientTypes: calculated([], () => ['@cloudflare/workers-types'], ['ambientTypes']),
-    sourceAlias: calculated(
+    moduleKind: di.toFun([], () => 'NodeNext'),
+    moduleResolutionKind: di.toFun([], () => 'NodeNext'),
+    standardLibraries: di.toFun(['languageTarget'], target => [target]),
+    baseAmbientTypes: di.toFun([], () => ['@cloudflare/workers-types'], ['ambientTypes']),
+    sourceAlias: di.toFun(
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
     ),
-    productToolPackages: calculated(['intent', 'developmentIntents'], (intent, intents) =>
+    productToolPackages: di.toFun(['intent', 'developmentIntents'], (intent, intents) =>
       hasIntent(intents, intent)
         ? ['@tsconfig/strictest', '@cloudflare/workers-types', 'typescript', 'wrangler']
         : [], ['toolPackages']),
-    productRuntimePackages: calculated([], () => [], ['runtimePackages']),
-    productAllowBuilds: calculated([], () => ['sharp', 'workerd'], ['allowBuilds']),
+    productRuntimePackages: di.toFun([], () => [], ['runtimePackages']),
+    productAllowBuilds: di.toFun([], () => ['sharp', 'workerd'], ['allowBuilds']),
     cloudflareVersionDefaults: versionDefaults({
       '@cloudflare/workers-types': '4.20250620.0',
       wrangler: '4.0.0',
     }),
-    buildAssets: calculated(['buildAssetInputs'], assets => assets),
+    buildAssets: di.toFun(['buildAssetInputs'], assets => assets),
     ...commandTargets('cloudflareTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
   }
-  return feature('cloudflare-worker', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }
 
 const viteRuntimePackages = Object.freeze([
@@ -345,20 +320,20 @@ export function viteReact({ language = 'ES2020' } = {}) {
     buildAssetInputs: Object.freeze(['index.html', 'public']),
   }
   const settings = {
-    moduleKind: calculated([], () => 'ESNext'),
-    moduleResolutionKind: calculated([], () => 'Bundler'),
-    standardLibraries: calculated(['languageTarget'], target => [target, 'DOM', 'DOM.Iterable']),
-    baseAmbientTypes: calculated([], () => [], ['ambientTypes']),
-    sourceAlias: calculated(
+    moduleKind: di.toFun([], () => 'ESNext'),
+    moduleResolutionKind: di.toFun([], () => 'Bundler'),
+    standardLibraries: di.toFun(['languageTarget'], target => [target, 'DOM', 'DOM.Iterable']),
+    baseAmbientTypes: di.toFun([], () => [], ['ambientTypes']),
+    sourceAlias: di.toFun(
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
     ),
-    productToolPackages: calculated(['intent', 'developmentIntents'], (intent, intents) =>
+    productToolPackages: di.toFun(['intent', 'developmentIntents'], (intent, intents) =>
       hasIntent(intents, intent)
         ? ['@tsconfig/strictest', '@types/node', '@types/react', '@types/react-dom', 'typescript', 'vite']
         : [], ['toolPackages']),
-    productRuntimePackages: calculated([], () => viteRuntimePackages, ['runtimePackages']),
-    productAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
+    productRuntimePackages: di.toFun([], () => viteRuntimePackages, ['runtimePackages']),
+    productAllowBuilds: di.toFun([], () => ['esbuild'], ['allowBuilds']),
     viteVersionDefaults: versionDefaults({
       '@tailwindcss/vite': '4.3.3',
       '@types/node': '26.2.0',
@@ -374,14 +349,14 @@ export function viteReact({ language = 'ES2020' } = {}) {
       tailwindcss: '4.3.3',
       vite: '5.3.1',
     }),
-    buildAssets: calculated(['buildAssetInputs'], assets => assets),
-    viteIntents: calculated([], () => Object.freeze(['dev', 'test', 'build'])),
-    'vite.plugins': calculated([], () => ['react', 'tailwindcss']),
-    'vite.resolve.alias': calculated(
+    buildAssets: di.toFun(['buildAssetInputs'], assets => assets),
+    viteIntents: di.toFun([], () => Object.freeze(['dev', 'test', 'build'])),
+    'vite.plugins': di.toFun([], () => ['react', 'tailwindcss']),
+    'vite.resolve.alias': di.toFun(
       ['sourceAlias', 'sourceDirectory'],
       (alias, directory) => ({ [alias.viteName]: `./${directory}` }),
     ),
-    viteConfig: calculated(
+    viteConfig: di.toFun(
       ['intent', 'viteIntents', 'vite.plugins', 'vite.resolve.alias'],
       (intent, intents, plugins, alias) => hasIntent(intents, intent)
         ? `import { fileURLToPath, URL } from 'node:url'
@@ -396,7 +371,7 @@ export default defineConfig({
 `
         : undefined,
     ),
-    viteGeneratedFiles: calculated(
+    viteGeneratedFiles: di.toFun(
       ['viteConfig'],
       config => config === undefined ? {} : { 'vite.config.ts': config },
       ['generatedFiles'],
@@ -406,13 +381,16 @@ export default defineConfig({
       assets: true,
       dependencies: true,
     }),
-    viteDevInstallTarget: calculated(
+    viteDevInstallTarget: di.toFun(
       ['config:dev/workspace', '#dagrRuntime'],
       (workspace, runtime) => hostInstallTarget('install', workspace, runtime),
       [devFacet.targets],
     ),
   }
-  return feature('vite-react', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }
 
 export function prettier({
@@ -430,17 +408,17 @@ export function prettier({
     formatTrailingCommas: trailingComma,
   }
   const settings = {
-    prettierIntents: calculated([], () => Object.freeze(['dev', 'lint'])),
+    prettierIntents: di.toFun([], () => Object.freeze(['dev', 'lint'])),
     prettierVersionDefaults: versionDefaults({ prettier: '3.3.3' }),
-    prettierToolPackages: calculated(['intent', 'prettierIntents'], (intent, intents) =>
+    prettierToolPackages: di.toFun(['intent', 'prettierIntents'], (intent, intents) =>
       hasIntent(intents, intent) ? ['prettier'] : [], ['toolPackages']),
-    'prettier.$schema': calculated([], () => 'https://json.schemastore.org/prettierrc'),
-    'prettier.semi': calculated(['formatSemicolons'], value => value),
-    'prettier.tabWidth': calculated(['formatTabWidth'], value => value),
-    'prettier.singleQuote': calculated(['formatSingleQuotes'], value => value),
-    'prettier.printWidth': calculated(['formatPrintWidth'], value => value),
-    'prettier.trailingComma': calculated(['formatTrailingCommas'], value => value),
-    prettierConfig: calculated(
+    'prettier.$schema': di.toFun([], () => 'https://json.schemastore.org/prettierrc'),
+    'prettier.semi': di.toFun(['formatSemicolons'], value => value),
+    'prettier.tabWidth': di.toFun(['formatTabWidth'], value => value),
+    'prettier.singleQuote': di.toFun(['formatSingleQuotes'], value => value),
+    'prettier.printWidth': di.toFun(['formatPrintWidth'], value => value),
+    'prettier.trailingComma': di.toFun(['formatTrailingCommas'], value => value),
+    prettierConfig: di.toFun(
       [
         'intent',
         'prettierIntents',
@@ -456,47 +434,46 @@ export function prettier({
           ? { $schema: schema, semi: semicolons, tabWidth: width, singleQuote: quotes, printWidth, trailingComma: commas }
           : undefined,
     ),
-    prettierGeneratedFiles: calculated(
+    prettierGeneratedFiles: di.toFun(
       ['prettierConfig'],
       config => config === undefined ? {} : { '.prettierrc.json': config },
       ['generatedFiles'],
     ),
   }
-  return feature('prettier', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }
 
 export function biome({ formatter = true, linter = true } = {}) {
-  return defineFeature('biome', {
-    inputs: {
-      biomeFormatterIntent: formatter,
-      biomeLinterIntent: linter,
-    },
-    settings: {
-      biomeIntents: value(Object.freeze(['dev', 'lint'])),
-      biomeVersionDefaults: versionDefaults({ '@biomejs/biome': '2.5.10' }),
-      biomeToolPackages: setting(
-        ['intent', 'biomeIntents'],
-        (intent, intents) => hasIntent(intents, intent) ? ['@biomejs/biome'] : [],
-        { tags: ['toolPackages'] },
-      ),
-      'biome.formatter.enabled': setting(['biomeFormatterIntent'], enabled => enabled),
-      'biome.linter.enabled': setting(['biomeLinterIntent'], enabled => enabled),
-      biomeConfig: setting(
-        ['intent', 'biomeIntents', 'biome.formatter.enabled', 'biome.linter.enabled'],
-        (intent, intents, formatterEnabled, linterEnabled) => hasIntent(intents, intent)
-          ? { formatter: { enabled: formatterEnabled }, linter: { enabled: linterEnabled } }
-          : undefined,
-      ),
-      biomeGeneratedFiles: setting(
-        ['biomeConfig'],
-        config => config === undefined ? {} : { 'biome.json': config },
-        { tags: ['generatedFiles'] },
-      ),
-      ...commandTargets('biomeLint', 'lint', 'pnpm exec biome check .', {
-        buildDependency: true,
-        enabled: 'ci:lint/biomeLinterIntent',
-      }),
-    },
+  return di.module({
+    biomeFormatterIntent: di.toValue(formatter),
+    biomeLinterIntent: di.toValue(linter),
+    biomeIntents: di.toValue(Object.freeze(['dev', 'lint'])),
+    biomeVersionDefaults: versionDefaults({ '@biomejs/biome': '2.5.10' }),
+    biomeToolPackages: di.toFun(
+      ['intent', 'biomeIntents'],
+      (intent, intents) => hasIntent(intents, intent) ? ['@biomejs/biome'] : [],
+      ['toolPackages'],
+    ),
+    'biome.formatter.enabled': di.toFun(['biomeFormatterIntent'], enabled => enabled),
+    'biome.linter.enabled': di.toFun(['biomeLinterIntent'], enabled => enabled),
+    biomeConfig: di.toFun(
+      ['intent', 'biomeIntents', 'biome.formatter.enabled', 'biome.linter.enabled'],
+      (intent, intents, formatterEnabled, linterEnabled) => hasIntent(intents, intent)
+        ? { formatter: { enabled: formatterEnabled }, linter: { enabled: linterEnabled } }
+        : undefined,
+    ),
+    biomeGeneratedFiles: di.toFun(
+      ['biomeConfig'],
+      config => config === undefined ? {} : { 'biome.json': config },
+      ['generatedFiles'],
+    ),
+    ...commandTargets('biomeLint', 'lint', 'pnpm exec biome check .', {
+      buildDependency: true,
+      enabled: 'ci:lint/biomeLinterIntent',
+    }),
   })
 }
 
@@ -507,33 +484,33 @@ export function vitest({ environment = 'node', globals = false, typecheck = fals
     testTypecheckIntent: typecheck,
   }
   const settings = {
-    vitestIntents: calculated([], () => Object.freeze(['dev', 'test'])),
-    vitestDependencyIntents: calculated([], () => Object.freeze(['dev', 'test', 'lint'])),
-    vitestTypeIntents: calculated([], () => Object.freeze(['dev', 'test', 'lint'])),
+    vitestIntents: di.toFun([], () => Object.freeze(['dev', 'test'])),
+    vitestDependencyIntents: di.toFun([], () => Object.freeze(['dev', 'test', 'lint'])),
+    vitestTypeIntents: di.toFun([], () => Object.freeze(['dev', 'test', 'lint'])),
     vitestVersionDefaults: versionDefaults({
       jsdom: '30.0.1',
       vitest: '3.2.7',
     }),
     ...(environment === 'jsdom' ? { vitestViteRequirement: requires('viteConfig') } : {}),
-    vitestToolPackages: calculated(['intent', 'vitestDependencyIntents', 'testEnvironment'], (intent, intents, env) =>
+    vitestToolPackages: di.toFun(['intent', 'vitestDependencyIntents', 'testEnvironment'], (intent, intents, env) =>
       hasIntent(intents, intent) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : [], ['toolPackages']),
-    vitestAmbientTypes: calculated(
+    vitestAmbientTypes: di.toFun(
       ['intent', 'vitestTypeIntents', 'testGlobalsIntent'],
       (intent, intents, globals) => globals && hasIntent(intents, intent) ? ['vitest/globals'] : [],
       ['ambientTypes'],
     ),
-    'vitest.test.environment': calculated(['testEnvironment'], value => value),
-    'vitest.test.globals': calculated(['testGlobalsIntent'], value => value),
-    'vitest.test.typecheck.enabled': calculated(['testTypecheckIntent'], value => value),
-    'vitest.test.exclude': calculated(
+    'vitest.test.environment': di.toFun(['testEnvironment'], value => value),
+    'vitest.test.globals': di.toFun(['testGlobalsIntent'], value => value),
+    'vitest.test.typecheck.enabled': di.toFun(['testTypecheckIntent'], value => value),
+    'vitest.test.exclude': di.toFun(
       ['testEnvironment'],
       env => env === 'jsdom' ? ['...configDefaults.exclude', 'e2e/**'] : undefined,
     ),
-    'vitest.test.root': calculated(
+    'vitest.test.root': di.toFun(
       ['testEnvironment'],
       env => env === 'jsdom' ? './' : undefined,
     ),
-    vitestConfig: calculated(
+    vitestConfig: di.toFun(
       [
         'intent',
         'vitestIntents',
@@ -567,17 +544,20 @@ export default defineConfig({ test: {
 `
       },
     ),
-    vitestGeneratedFiles: calculated(
+    vitestGeneratedFiles: di.toFun(
       ['vitestConfig'],
       config => config === undefined ? {} : { 'vitest.config.ts': config },
       ['generatedFiles'],
     ),
-    vitestAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
+    vitestAllowBuilds: di.toFun([], () => ['esbuild'], ['allowBuilds']),
     ...commandTargets('vitestTest', 'test', 'pnpm exec vitest run', {
       buildDependency: true,
     }),
   }
-  return feature('vitest', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }
 
 export function eslint({ prettier: enforceFormatting = false, explicitReturnTypes = false } = {}) {
@@ -586,7 +566,7 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
     lintExplicitReturnTypesIntent: explicitReturnTypes,
   }
   const settings = {
-    eslintIntents: calculated([], () => Object.freeze(['dev', 'lint'])),
+    eslintIntents: di.toFun([], () => Object.freeze(['dev', 'lint'])),
     eslintVersionDefaults: versionDefaults({
       '@eslint/js': '9.12.0',
       '@typescript-eslint/eslint-plugin': '8.66.0',
@@ -595,8 +575,8 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
       'eslint-plugin-prettier': '5.2.1',
       prettier: '3.3.3',
     }),
-    'eslint.enabled': calculated([], () => true),
-    eslintToolPackages: calculated(
+    'eslint.enabled': di.toFun([], () => true),
+    eslintToolPackages: di.toFun(
       ['intent', 'eslintIntents', 'lintFormattingIntent'],
       (intent, intents, formatting) => hasIntent(intents, intent)
         ? [
@@ -609,13 +589,13 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
         : [],
       ['toolPackages'],
     ),
-    'eslint.languageOptions.parser': calculated([], () => '@typescript-eslint/parser'),
-    'eslint.languageOptions.parserOptions.project': calculated([], () => './tsconfig.json'),
-    'eslint.files': calculated(
+    'eslint.languageOptions.parser': di.toFun([], () => '@typescript-eslint/parser'),
+    'eslint.languageOptions.parserOptions.project': di.toFun([], () => './tsconfig.json'),
+    'eslint.files': di.toFun(
       ['sourceLayout'],
       layout => [`${layout.directory}/**/*.ts`, `${layout.directory}/**/*.tsx`],
     ),
-    'eslint.testFiles': calculated(
+    'eslint.testFiles': di.toFun(
       ['sourceLayout'],
       layout => [
         `${layout.directory}/**/*.test.ts`,
@@ -624,20 +604,20 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
         `${layout.directory}/**/*.spec.tsx`,
       ],
     ),
-    'eslint.rules.no-undef': calculated([], () => 'off'),
-    'eslint.rules.no-redeclare': calculated([], () => 'off'),
-    'eslint.rules.no-dupe-class-members': calculated([], () => 'off'),
-    'eslint.rules.@typescript-eslint/no-empty-object-type': calculated([], () => 'off'),
-    'eslint.rules.@typescript-eslint/no-unused-vars': calculated([], () => 'error'),
-    'eslint.rules.@typescript-eslint/explicit-function-return-type': calculated(
+    'eslint.rules.no-undef': di.toFun([], () => 'off'),
+    'eslint.rules.no-redeclare': di.toFun([], () => 'off'),
+    'eslint.rules.no-dupe-class-members': di.toFun([], () => 'off'),
+    'eslint.rules.@typescript-eslint/no-empty-object-type': di.toFun([], () => 'off'),
+    'eslint.rules.@typescript-eslint/no-unused-vars': di.toFun([], () => 'error'),
+    'eslint.rules.@typescript-eslint/explicit-function-return-type': di.toFun(
       ['lintExplicitReturnTypesIntent'],
       enabled => enabled ? 'error' : undefined,
     ),
-    'eslint.rules.prettier/prettier': calculated(
+    'eslint.rules.prettier/prettier': di.toFun(
       ['lintFormattingIntent'],
       enabled => enabled ? 'error' : undefined,
     ),
-    eslintRules: calculated(
+    eslintRules: di.toFun(
       [
         'eslint.rules.no-undef',
         'eslint.rules.no-redeclare',
@@ -662,7 +642,7 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
           ...Reflect.ownKeys(extensions).map(name => extensions[name]),
         ]),
     ),
-    eslintConfig: calculated(
+    eslintConfig: di.toFun(
       [
         'intent',
         'eslintIntents',
@@ -696,7 +676,7 @@ export default [
 `
         : undefined,
     ),
-    eslintGeneratedFiles: calculated(
+    eslintGeneratedFiles: di.toFun(
       ['eslintConfig'],
       config => config === undefined ? {} : { 'eslint.config.mjs': config },
       ['generatedFiles'],
@@ -705,30 +685,33 @@ export default [
       buildDependency: true,
     }),
   }
-  return feature('eslint', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }
 
 export function typedoc({ title } = {}) {
   const inputs = { documentationTitle: title }
   const settings = {
-    typedocIntents: calculated([], () => Object.freeze(['dev', 'docs'])),
+    typedocIntents: di.toFun([], () => Object.freeze(['dev', 'docs'])),
     typedocVersionDefaults: versionDefaults({ typedoc: '0.28.13' }),
-    typedocToolPackages: calculated(['intent', 'typedocIntents'], (intent, intents) =>
+    typedocToolPackages: di.toFun(['intent', 'typedocIntents'], (intent, intents) =>
       hasIntent(intents, intent) ? ['typedoc'] : [], ['toolPackages']),
-    'typedoc.entryPoints': calculated(['sourceEntry'], entry => [entry]),
-    'typedoc.name': calculated(
+    'typedoc.entryPoints': di.toFun(['sourceEntry'], entry => [entry]),
+    'typedoc.name': di.toFun(
       ['documentationTitle', 'name'],
       (title, name) => title ?? name,
     ),
-    'typedoc.includeVersion': calculated([], () => true),
-    'typedoc.excludeExternals': calculated([], () => true),
-    'typedoc.excludePrivate': calculated([], () => true),
-    'typedoc.excludeProtected': calculated([], () => true),
-    'typedoc.exclude': calculated(
+    'typedoc.includeVersion': di.toFun([], () => true),
+    'typedoc.excludeExternals': di.toFun([], () => true),
+    'typedoc.excludePrivate': di.toFun([], () => true),
+    'typedoc.excludeProtected': di.toFun([], () => true),
+    'typedoc.exclude': di.toFun(
       ['sourceSet'],
       sources => sources.exclude ?? [],
     ),
-    typedocConfig: calculated(
+    typedocConfig: di.toFun(
       [
         'intent',
         'typedocIntents',
@@ -745,7 +728,7 @@ export function typedoc({ title } = {}) {
         ? { entryPoints, name, includeVersion, excludeExternals, excludePrivate, excludeProtected, exclude }
         : undefined,
     ),
-    typedocGeneratedFiles: calculated(
+    typedocGeneratedFiles: di.toFun(
       ['typedocConfig'],
       config => config === undefined ? {} : { 'typedoc.json': config },
       ['generatedFiles'],
@@ -754,5 +737,8 @@ export function typedoc({ title } = {}) {
       export: { '/repo/docs/': 'docs/' },
     }),
   }
-  return feature('typedoc', inputs, settings)
+  return di.module({
+    ...Object.fromEntries(Reflect.ownKeys(inputs).map(key => [key, di.toValue(inputs[key])])),
+    ...settings,
+  })
 }

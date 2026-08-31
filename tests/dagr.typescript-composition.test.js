@@ -1,21 +1,22 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import di from '../di/dagr.di.js'
-import {
+import { loadTypeScript } from './dagr.typescript-loader.js'
+
+const {
   biome,
   cloudflareWorker,
-  defineFeature,
+  di,
   eslint,
   library,
   prettier,
   requires,
-  setting,
   typedoc,
   viteReact,
   vitest,
-} from '../typescript/dagr.features.js'
-import { typescriptModule, workspaceKey } from '../typescript/dagr.module.js'
+  typescriptModule,
+  workspaceKey,
+} = await loadTypeScript()
 
 const versions = {
   '@biomejs/biome': '2',
@@ -62,14 +63,19 @@ const withWorkspaces = module => {
   })
 }
 
-const moduleFor = features => withWorkspaces(typescriptModule(di, {
+const mergeFeatures = features => features.reduce(
+  (module, feature) => module.merge(feature),
+  di.module({}),
+)
+
+const moduleFor = features => withWorkspaces(typescriptModule({
   location: '//packages/example',
   scope: 'internal',
   version: '1.2.3',
   deps: [],
   metadata: { description: 'Example' },
   versions,
-  features,
+  features: mergeFeatures(features),
 }))
 
 describe('composable TypeScript workspaces', () => {
@@ -149,7 +155,7 @@ describe('composable TypeScript workspaces', () => {
   })
 
   it('gets capability policy and fallback versions only from active features', () => {
-    const module = typescriptModule(di, {
+    const module = typescriptModule({
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
@@ -160,7 +166,7 @@ describe('composable TypeScript workspaces', () => {
         typescript: '6.0.3',
       },
       versions: { vitest: 'repository-choice' },
-      features: [library({ runtime: 'node' }), vitest()],
+      features: mergeFeatures([library({ runtime: 'node' }), vitest()]),
     })
     const { graph, workspace } = withWorkspaces(module)
     const dev = workspace('dev:sync')
@@ -173,14 +179,14 @@ describe('composable TypeScript workspaces', () => {
   })
 
   it('treats conventions as replaceable roots of the semantic graph', () => {
-    const { workspace } = withWorkspaces(typescriptModule(di, {
+    const { workspace } = withWorkspaces(typescriptModule({
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
       deps: [],
       metadata: {},
       versions,
-      features: [library()],
+      features: mergeFeatures([library()]),
       conventions: { sourceDirectory: 'source', outputDirectory: 'build' },
     }))
 
@@ -198,14 +204,14 @@ describe('composable TypeScript workspaces', () => {
   })
 
   it('projects source conventions into every tool that consumes source paths', () => {
-    const { workspace } = withWorkspaces(typescriptModule(di, {
+    const { workspace } = withWorkspaces(typescriptModule({
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
       deps: [],
       metadata: {},
       versions,
-      features: [library(), eslint(), typedoc()],
+      features: mergeFeatures([library(), eslint(), typedoc()]),
       conventions: { sourceDirectory: 'source' },
     }))
 
@@ -303,15 +309,12 @@ describe('composable TypeScript workspaces', () => {
   })
 
   it('lets features extend ESLint rules through settings and fails without ESLint', () => {
-    const companyRules = defineFeature('company-eslint-rules', {
-      settings: {
-        companyEslintRequirement: requires('eslint.enabled'),
-        companyEslintRules: setting(
-          [],
-          () => ({ '@typescript-eslint/consistent-type-imports': 'error' }),
-          { tags: ['eslint.ruleSets'] },
-        ),
-      },
+    const companyRules = di.module({
+      companyEslintRequirement: requires('eslint.enabled'),
+      companyEslintRules: di.toValue(
+        { '@typescript-eslint/consistent-type-imports': 'error' },
+        ['eslint.ruleSets'],
+      ),
     })
 
     const lint = moduleFor([library(), eslint(), companyRules]).workspace('ci:lint')
@@ -323,13 +326,13 @@ describe('composable TypeScript workspaces', () => {
   })
 
   it('rejects derived package fields disguised as metadata', () => {
-    const module = typescriptModule(di, {
+    const module = typescriptModule({
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
       metadata: { private: false },
       versions,
-      features: [library()],
+      features: mergeFeatures([library()]),
     })
     const { workspace } = withWorkspaces(module)
     assert.throws(() => workspace('dev:sync'), /cannot configure non-metadata field private/)

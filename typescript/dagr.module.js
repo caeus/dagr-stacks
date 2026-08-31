@@ -1,3 +1,6 @@
+import di from '//di//dagr.di.js'
+import { facetOf } from '//dagr.features.js'
+
 const DEFAULT_CONVENTIONS = Object.freeze({
   developmentIntents: Object.freeze(['dev', 'typecheck', 'test', 'lint', 'docs', 'build']),
   distributionIntents: Object.freeze(['pack', 'publish']),
@@ -15,7 +18,7 @@ const DEFAULT_CONVENTIONS = Object.freeze({
   javascriptModuleFormat: 'esm',
 })
 
-function conventionModule(di, overrides = {}) {
+function conventionModule(overrides = {}) {
   const unknown = Object.keys(overrides).filter(name => !Object.hasOwn(DEFAULT_CONVENTIONS, name))
   if (unknown.length > 0) {
     throw new Error(`Unknown TypeScript convention${unknown.length === 1 ? '' : 's'} ${unknown.join(', ')}`)
@@ -106,7 +109,7 @@ const mergeVersionCatalogs = catalogs => {
   return versions
 }
 
-function aggregateModule(di) {
+function aggregateModule() {
   return di.module({
     featureToolPackages: di.toFun(
       [{ tag: 'toolPackages' }],
@@ -139,7 +142,7 @@ function aggregateModule(di) {
   })
 }
 
-const coreModule = di => di.module({
+const coreModule = () => di.module({
   versions: di.toFun(
     ['stackVersionDefaults', 'featureVersionDefaults', 'configuredVersions'],
     (stackDefaults, featureDefaults, configured) => ({
@@ -221,7 +224,7 @@ const coreModule = di => di.module({
   ambientTypes: di.toFun(['featureAmbientTypes'], types => types),
 })
 
-const packageModule = di => di.module({
+const packageModule = () => di.module({
   dependencyEntries: di.toFun(
     ['name', 'scope', 'deps', 'versions', 'dependencyLocations', 'featureRuntimePackages'],
     dependencyEntries,
@@ -291,7 +294,7 @@ const packageModule = di => di.module({
   ),
 })
 
-const tsconfigModule = di => di.module({
+const tsconfigModule = () => di.module({
   'tsconfig.extends': di.toFun([], () => '@tsconfig/strictest/tsconfig.json'),
   'tsconfig.include': di.toFun(['sourceSet'], value => value.include),
   'tsconfig.exclude': di.toFun(['sourceSet'], value => value.exclude),
@@ -372,7 +375,7 @@ const tsconfigModule = di => di.module({
   ),
 })
 
-const workspaceModule = di => di.module({
+const workspaceModule = () => di.module({
   files: di.toFun(
     ['packageJson', 'tsconfig', 'featureGeneratedFiles'],
     (packageJson, tsconfig, generated) => ({ 'package.json': packageJson, 'tsconfig.json': tsconfig, ...generated }),
@@ -408,7 +411,7 @@ const workspaceDependency = (workspace, dependency) => typeof dependency === 'ob
   ? { tag: workspaceKey(workspace, dependency.tag) }
   : workspaceKey(workspace, dependency)
 
-function qualifyWorkspace(di, workspace, module) {
+function qualifyWorkspace(workspace, module) {
   return di.module(Object.fromEntries([...module.keys()].map(name => {
     const definition = module.definitionOf(name)
     return [workspaceKey(workspace, name), di.toFun(
@@ -419,25 +422,18 @@ function qualifyWorkspace(di, workspace, module) {
   })))
 }
 
-const valueModule = (di, values) => di.module(Object.fromEntries(
+const valueModule = values => di.module(Object.fromEntries(
   Reflect.ownKeys(values).map(name => [name, di.toValue(values[name])]),
 ))
 
-function workspaceTemplate(di, inputs, intent, features, conventions) {
-  let module = valueModule(di, { ...inputs, intent })
-    .merge(conventionModule(di, conventions))
-    .merge(coreModule(di))
-    .merge(aggregateModule(di))
-    .merge(packageModule(di))
-    .merge(tsconfigModule(di))
-    .merge(workspaceModule(di))
-  for (const feature of features) {
-    module = module
-      .merge(valueModule(di, feature.inputs))
-      .merge(di.module(feature.settings))
-  }
-  return module
-}
+const workspaceTemplate = (inputs, intent, features, conventions) => valueModule({ ...inputs, intent })
+  .merge(conventionModule(conventions))
+  .merge(coreModule())
+  .merge(aggregateModule())
+  .merge(packageModule())
+  .merge(tsconfigModule())
+  .merge(workspaceModule())
+  .merge(features)
 
 const intentForWorkspace = workspace => {
   const [facet, name] = workspace.split(':', 2)
@@ -446,7 +442,7 @@ const intentForWorkspace = workspace => {
   return name
 }
 
-export function typescriptModule(di, {
+export function typescriptModule({
   location,
   scope,
   version,
@@ -468,8 +464,16 @@ export function typescriptModule(di, {
     stackVersionDefaults: defaultVersions,
   }
 
-  let targets = di.module({ '#dagrRuntime': di.toValue(dagrRuntime) })
-  for (const feature of features) targets = targets.merge(di.module(feature.targets))
+  const settingEntries = []
+  const targetEntries = []
+  for (const name of features.keys()) {
+    const definition = features.definitionOf(name)
+    const entries = facetOf(definition) ? targetEntries : settingEntries
+    entries.push([name, definition])
+  }
+  const featureSettings = di.module(Object.fromEntries(settingEntries))
+  const targets = di.module({ '#dagrRuntime': di.toValue(dagrRuntime) })
+    .merge(di.module(Object.fromEntries(targetEntries)))
 
   const workspaces = new Set(['dev:sync', 'config:dev'])
   for (const name of targets.keys()) {
@@ -483,9 +487,8 @@ export function typescriptModule(di, {
   let module = targets
   for (const workspace of workspaces) {
     module = module.merge(qualifyWorkspace(
-      di,
       workspace,
-      workspaceTemplate(di, inputs, intentForWorkspace(workspace), features, conventions),
+      workspaceTemplate(inputs, intentForWorkspace(workspace), featureSettings, conventions),
     ))
   }
   return module

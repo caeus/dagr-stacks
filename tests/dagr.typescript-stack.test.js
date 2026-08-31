@@ -90,8 +90,8 @@ describe('mountable TypeScript stack', () => {
     assert.equal(index.ci.test.name, 'test')
     assert.deepEqual([...index.ci.test.deps], ['install-test'])
     assert.equal(typeof index.ci.test.run, 'function')
-    assert.equal(calculations.nodes['dev:sync/intent'].kind, 'calculated')
     assert.equal(calculations.nodes['dev:sync/intent'].deps.length, 0)
+    assert.equal(calculations.nodes['dev:sync/intent'].factory(), 'dev')
     assert.equal(calculations.nodes.index.deps[0].tag.description, 'typescript facets')
     const ciTargets = calculations.nodes['facet:ci'].deps[0].tag
     assert.equal(ciTargets.description, 'ci targets')

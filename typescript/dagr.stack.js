@@ -4,7 +4,7 @@ import { writeJson, writeText, writeYaml } from '//dagr.file_utils.js'
 import { pnpmfile } from '//dagr.utils.js'
 import { RECOMMENDED_IGNORE } from '//dagr.dockerignore.js'
 import { configFacet, devFacet, target } from '//dagr.features.js'
-import { typescriptProgram } from '//dagr.program.js'
+import { typescriptModule } from '//dagr.module.js'
 
 export * from '//dagr.features.js'
 
@@ -33,7 +33,7 @@ function createStack(options, features, declaration) {
   const {
     base = '//packages/base:ci:node-pnpm',
     scope = 'internal',
-    versions = bundledVersions.deps,
+    versions = {},
     conventions = {},
     ignore = RECOMMENDED_IGNORE,
     transform = index => index,
@@ -54,20 +54,21 @@ function createStack(options, features, declaration) {
     writeText,
     writeYaml,
   })
-  const program = typescriptProgram(di, {
+  let module = typescriptModule(di, {
     location,
     scope,
     version,
     deps,
     metadata,
     versions,
+    defaultVersions: bundledVersions.deps,
     features,
     conventions,
     dagrRuntime,
   })
 
   const facets = Object.freeze({
-    ...program.facets,
+    ...Object.assign({}, ...features.map(feature => feature.facets)),
     [configFacet.name]: configFacet,
     [devFacet.name]: devFacet,
   })
@@ -120,22 +121,15 @@ function createStack(options, features, declaration) {
     ),
   )
 
+  module = module.merge(di.module(bindings))
   calculations = Object.freeze({
-    nodes: Object.freeze({
-      ...program.graph.nodes,
-      ...Object.fromEntries(Object.entries(bindings).map(([name, definition]) => [
-        name,
-        Object.freeze({ kind: 'calculated', deps: definition.deps, tags: definition.tags }),
-      ])),
-    }),
-    owners: Object.freeze({
-      ...program.graph.owners,
-      ...Object.fromEntries(Object.keys(bindings).map(name => [name, 'typescript-index'])),
-    }),
+    nodes: Object.freeze(Object.fromEntries([...module.keys()].map(name => [
+      name,
+      module.definitionOf(name),
+    ]))),
   })
 
-  return program.module
-    .merge(di.module(bindings))
+  return module
     .shake(['index'])
     .compile()
     .index
@@ -145,7 +139,9 @@ function builder(options, features) {
   const stack = declaration => createStack(options, features, declaration)
   return Object.assign(stack, {
     with(next) {
-      if (!next?.module || !next?.name) throw new Error('with() expects a TypeScript stack feature')
+      if (!next?.settings || !next?.targets || !next?.name) {
+        throw new Error('with() expects a TypeScript stack feature')
+      }
       if (features.some(feature => feature.name === next.name)) {
         throw new Error(`TypeScript stack feature ${JSON.stringify(next.name)} was added more than once`)
       }

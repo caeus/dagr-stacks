@@ -15,34 +15,40 @@ export const devFacet = facet('dev')
 export const ciFacet = facet('ci')
 export const publishFacet = facet('publish')
 
-const node = (kind, deps = [], factory, tags = []) => {
-  const targetFacets = tags.map(tag => facetsByTargetTag.get(tag)).filter(Boolean)
-  if (targetFacets.length > 1) throw new Error('A target setting cannot belong to multiple facets')
+export const setting = (deps, factory, { tags = [] } = {}) => ({ deps, factory, tags })
+
+const calculated = (deps, factory, tags = []) => setting(deps, factory, { tags })
+
+const feature = (name, inputs, definitions) => {
+  const settings = {}
+  const targets = {}
+  const facets = {}
+  for (const key of Reflect.ownKeys(definitions)) {
+    const definition = definitions[key]
+    const targetFacets = definition.tags.map(tag => facetsByTargetTag.get(tag)).filter(Boolean)
+    if (targetFacets.length > 1) throw new Error('A target setting cannot belong to multiple facets')
+    if (targetFacets.length === 0) {
+      settings[key] = definition
+      continue
+    }
+    targets[key] = definition
+    facets[targetFacets[0].name] = targetFacets[0]
+  }
   return Object.freeze({
-    kind,
-    deps: Object.freeze([...deps]),
-    tags: Object.freeze([...tags]),
-    ...(targetFacets.length === 0 ? {} : { facet: targetFacets[0] }),
-    ...(factory === undefined ? {} : { factory }),
+    name,
+    inputs: Object.freeze({ ...inputs }),
+    settings: Object.freeze(settings),
+    targets: Object.freeze(targets),
+    facets: Object.freeze(facets),
   })
 }
 
-const external = () => node('external')
-const calculated = (deps, factory, tags = []) => node('calculated', deps, factory, tags)
-const calculationModule = (name, nodes) => Object.freeze({
-  name,
-  nodes: Object.freeze({ ...nodes }),
-})
-
-const feature = (name, externalValues, module) => Object.freeze({
-  name,
-  externalValues: Object.freeze({ ...externalValues }),
-  module,
-})
-
-export const setting = (deps, factory, { tags = [] } = {}) => calculated(deps, factory, tags)
-
 export const value = (entry, options) => setting([], () => entry, options)
+
+const versionDefaults = entries => value(
+  Object.freeze({ ...entries }),
+  { tags: ['versionDefaults'] },
+)
 
 export const requires = (...dependencies) => setting(
   dependencies,
@@ -66,10 +72,7 @@ export function defineFeature(name, { inputs = {}, settings = {} } = {}) {
   if (conflicts.length > 0) {
     throw new Error(`TypeScript feature ${JSON.stringify(name)} declares ${conflicts.join(', ')} as both input and setting`)
   }
-  return feature(name, inputs, calculationModule(name, {
-    ...Object.fromEntries(Object.keys(inputs).map(key => [key, external()])),
-    ...settings,
-  }))
+  return feature(name, inputs, settings)
 }
 
 const hasIntent = (intents, intent) => intents.includes(intent)
@@ -158,12 +161,12 @@ const commandTargets = (prefix, name, command, {
   }
   return {
     [`${prefix}ConfigTarget`]: calculated(
-      [...enabledDeps, `config:${name}/workspace`, 'dagrRuntime'],
+      [...enabledDeps, `config:${name}/workspace`, '#dagrRuntime'],
       enabledFactory((workspace, runtime) => configurationTarget(name, workspace, runtime)),
       [configFacet.targets],
     ),
     [`${prefix}InstallTarget`]: calculated(
-      [...enabledDeps, `config:${name}/workspace`, 'dagrRuntime'],
+      [...enabledDeps, `config:${name}/workspace`, '#dagrRuntime'],
       enabledFactory((workspace, runtime) => installTarget(name, workspace, runtime)),
       [ciFacet.targets],
     ),
@@ -172,7 +175,7 @@ const commandTargets = (prefix, name, command, {
         ...enabledDeps,
         ...(dependencies ? [{ tag: 'buildDependencies' }] : []),
         `ci:${name}/workspace`,
-        'dagrRuntime',
+        '#dagrRuntime',
       ],
       enabledFactory((...values) => {
         const runtime = values.pop()
@@ -236,19 +239,14 @@ export function library({
   if (!['portable', 'node'].includes(runtime)) {
     throw new Error(`library runtime must be portable or node, got ${JSON.stringify(runtime)}`)
   }
-  const externalValues = {
+  const inputs = {
     productKind: 'library',
     runtimeKind: runtime,
     languageTarget: language,
     sourceMapIntent: sourceMaps,
     buildAssetInputs: Object.freeze([...assets]),
   }
-  const module = calculationModule('library', {
-    productKind: external(),
-    runtimeKind: external(),
-    languageTarget: external(),
-    sourceMapIntent: external(),
-    buildAssetInputs: external(),
+  const settings = {
     moduleKind: calculated(['runtimeKind'], runtime => runtime === 'node' ? 'NodeNext' : 'ESNext'),
     moduleResolutionKind: calculated(
       ['runtimeKind'],
@@ -270,6 +268,7 @@ export function library({
     ),
     productRuntimePackages: calculated([], () => [], ['runtimePackages']),
     productAllowBuilds: calculated([], () => [], ['allowBuilds']),
+    libraryVersionDefaults: versionDefaults({ '@types/node': '26.2.0' }),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
     ...commandTargets('libraryTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
     ...commandTargets('libraryBuild', 'build', 'pnpm exec tsc', {
@@ -277,35 +276,30 @@ export function library({
       dependencies: true,
     }),
     libraryCiPackTarget: calculated(
-      ['libraryBuildTarget', 'ci:pack/workspace', 'dagrRuntime'],
+      ['libraryBuildTarget', 'ci:pack/workspace', '#dagrRuntime'],
       (build, workspace, runtime) => packTarget('pack', workspace, runtime, { build }),
       [ciFacet.targets],
     ),
     libraryPublishPackTarget: calculated(
-      ['libraryBuildTarget', 'publish:pack/workspace', 'dagrRuntime'],
+      ['libraryBuildTarget', 'publish:pack/workspace', '#dagrRuntime'],
       (build, workspace, runtime) => packTarget('pack', workspace, runtime, { build }, {
         dependencyFacet: ciFacet.name,
       }),
       [publishFacet.targets],
     ),
-  })
-  return feature('library', externalValues, module)
+  }
+  return feature('library', inputs, settings)
 }
 
 export function cloudflareWorker({ language = 'ES2022' } = {}) {
-  const externalValues = {
+  const inputs = {
     productKind: 'worker',
     runtimeKind: 'cloudflare-worker',
     languageTarget: language,
     sourceMapIntent: false,
     buildAssetInputs: Object.freeze([]),
   }
-  const module = calculationModule('cloudflare-worker', {
-    productKind: external(),
-    runtimeKind: external(),
-    languageTarget: external(),
-    sourceMapIntent: external(),
-    buildAssetInputs: external(),
+  const settings = {
     moduleKind: calculated([], () => 'NodeNext'),
     moduleResolutionKind: calculated([], () => 'NodeNext'),
     standardLibraries: calculated(['languageTarget'], target => [target]),
@@ -320,10 +314,14 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
         : [], ['toolPackages']),
     productRuntimePackages: calculated([], () => [], ['runtimePackages']),
     productAllowBuilds: calculated([], () => ['sharp', 'workerd'], ['allowBuilds']),
+    cloudflareVersionDefaults: versionDefaults({
+      '@cloudflare/workers-types': '4.20250620.0',
+      wrangler: '4.0.0',
+    }),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
     ...commandTargets('cloudflareTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
-  })
-  return feature('cloudflare-worker', externalValues, module)
+  }
+  return feature('cloudflare-worker', inputs, settings)
 }
 
 const viteRuntimePackages = Object.freeze([
@@ -339,19 +337,14 @@ const viteRuntimePackages = Object.freeze([
 ])
 
 export function viteReact({ language = 'ES2020' } = {}) {
-  const externalValues = {
+  const inputs = {
     productKind: 'web',
     runtimeKind: 'browser',
     languageTarget: language,
     sourceMapIntent: false,
     buildAssetInputs: Object.freeze(['index.html', 'public']),
   }
-  const module = calculationModule('vite-react', {
-    productKind: external(),
-    runtimeKind: external(),
-    languageTarget: external(),
-    sourceMapIntent: external(),
-    buildAssetInputs: external(),
+  const settings = {
     moduleKind: calculated([], () => 'ESNext'),
     moduleResolutionKind: calculated([], () => 'Bundler'),
     standardLibraries: calculated(['languageTarget'], target => [target, 'DOM', 'DOM.Iterable']),
@@ -366,7 +359,23 @@ export function viteReact({ language = 'ES2020' } = {}) {
         : [], ['toolPackages']),
     productRuntimePackages: calculated([], () => viteRuntimePackages, ['runtimePackages']),
     productAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
+    viteVersionDefaults: versionDefaults({
+      '@tailwindcss/vite': '4.3.3',
+      '@types/node': '26.2.0',
+      '@types/react': '19.2.18',
+      '@types/react-dom': '19.2.4',
+      '@vitejs/plugin-react': '4.7.0',
+      'class-variance-authority': '0.7.1',
+      clsx: '2.1.1',
+      react: '19.2.8',
+      'react-dom': '19.2.8',
+      'react-router-dom': '7.18.2',
+      'tailwind-merge': '3.6.0',
+      tailwindcss: '4.3.3',
+      vite: '5.3.1',
+    }),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
+    viteIntents: calculated([], () => Object.freeze(['dev', 'test', 'build'])),
     'vite.plugins': calculated([], () => ['react', 'tailwindcss']),
     'vite.resolve.alias': calculated(
       ['sourceAlias', 'sourceDirectory'],
@@ -398,12 +407,12 @@ export default defineConfig({
       dependencies: true,
     }),
     viteDevInstallTarget: calculated(
-      ['config:dev/workspace', 'dagrRuntime'],
+      ['config:dev/workspace', '#dagrRuntime'],
       (workspace, runtime) => hostInstallTarget('install', workspace, runtime),
       [devFacet.targets],
     ),
-  })
-  return feature('vite-react', externalValues, module)
+  }
+  return feature('vite-react', inputs, settings)
 }
 
 export function prettier({
@@ -413,19 +422,16 @@ export function prettier({
   printWidth = 100,
   trailingComma = 'none',
 } = {}) {
-  const externalValues = {
+  const inputs = {
     formatSemicolons: semi,
     formatTabWidth: tabWidth,
     formatSingleQuotes: singleQuote,
     formatPrintWidth: printWidth,
     formatTrailingCommas: trailingComma,
   }
-  const module = calculationModule('prettier', {
-    formatSemicolons: external(),
-    formatTabWidth: external(),
-    formatSingleQuotes: external(),
-    formatPrintWidth: external(),
-    formatTrailingCommas: external(),
+  const settings = {
+    prettierIntents: calculated([], () => Object.freeze(['dev', 'lint'])),
+    prettierVersionDefaults: versionDefaults({ prettier: '3.3.3' }),
     prettierToolPackages: calculated(['intent', 'prettierIntents'], (intent, intents) =>
       hasIntent(intents, intent) ? ['prettier'] : [], ['toolPackages']),
     'prettier.$schema': calculated([], () => 'https://json.schemastore.org/prettierrc'),
@@ -455,8 +461,8 @@ export function prettier({
       config => config === undefined ? {} : { '.prettierrc.json': config },
       ['generatedFiles'],
     ),
-  })
-  return feature('prettier', externalValues, module)
+  }
+  return feature('prettier', inputs, settings)
 }
 
 export function biome({ formatter = true, linter = true } = {}) {
@@ -467,6 +473,7 @@ export function biome({ formatter = true, linter = true } = {}) {
     },
     settings: {
       biomeIntents: value(Object.freeze(['dev', 'lint'])),
+      biomeVersionDefaults: versionDefaults({ '@biomejs/biome': '2.5.10' }),
       biomeToolPackages: setting(
         ['intent', 'biomeIntents'],
         (intent, intents) => hasIntent(intents, intent) ? ['@biomejs/biome'] : [],
@@ -494,15 +501,19 @@ export function biome({ formatter = true, linter = true } = {}) {
 }
 
 export function vitest({ environment = 'node', globals = false, typecheck = false } = {}) {
-  const externalValues = {
+  const inputs = {
     testEnvironment: environment,
     testGlobalsIntent: globals,
     testTypecheckIntent: typecheck,
   }
-  const module = calculationModule('vitest', {
-    testEnvironment: external(),
-    testGlobalsIntent: external(),
-    testTypecheckIntent: external(),
+  const settings = {
+    vitestIntents: calculated([], () => Object.freeze(['dev', 'test'])),
+    vitestDependencyIntents: calculated([], () => Object.freeze(['dev', 'test', 'lint'])),
+    vitestTypeIntents: calculated([], () => Object.freeze(['dev', 'test', 'lint'])),
+    vitestVersionDefaults: versionDefaults({
+      jsdom: '30.0.1',
+      vitest: '3.2.7',
+    }),
     ...(environment === 'jsdom' ? { vitestViteRequirement: requires('viteConfig') } : {}),
     vitestToolPackages: calculated(['intent', 'vitestDependencyIntents', 'testEnvironment'], (intent, intents, env) =>
       hasIntent(intents, intent) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : [], ['toolPackages']),
@@ -565,18 +576,25 @@ export default defineConfig({ test: {
     ...commandTargets('vitestTest', 'test', 'pnpm exec vitest run', {
       buildDependency: true,
     }),
-  })
-  return feature('vitest', externalValues, module)
+  }
+  return feature('vitest', inputs, settings)
 }
 
 export function eslint({ prettier: enforceFormatting = false, explicitReturnTypes = false } = {}) {
-  const externalValues = {
+  const inputs = {
     lintFormattingIntent: enforceFormatting,
     lintExplicitReturnTypesIntent: explicitReturnTypes,
   }
-  const module = calculationModule('eslint', {
-    lintFormattingIntent: external(),
-    lintExplicitReturnTypesIntent: external(),
+  const settings = {
+    eslintIntents: calculated([], () => Object.freeze(['dev', 'lint'])),
+    eslintVersionDefaults: versionDefaults({
+      '@eslint/js': '9.12.0',
+      '@typescript-eslint/eslint-plugin': '8.66.0',
+      '@typescript-eslint/parser': '8.66.0',
+      eslint: '9.12.0',
+      'eslint-plugin-prettier': '5.2.1',
+      prettier: '3.3.3',
+    }),
     'eslint.enabled': calculated([], () => true),
     eslintToolPackages: calculated(
       ['intent', 'eslintIntents', 'lintFormattingIntent'],
@@ -686,14 +704,15 @@ export default [
     ...commandTargets('eslintLint', 'lint', 'pnpm exec eslint .', {
       buildDependency: true,
     }),
-  })
-  return feature('eslint', externalValues, module)
+  }
+  return feature('eslint', inputs, settings)
 }
 
 export function typedoc({ title } = {}) {
-  const externalValues = { documentationTitle: title }
-  const module = calculationModule('typedoc', {
-    documentationTitle: external(),
+  const inputs = { documentationTitle: title }
+  const settings = {
+    typedocIntents: calculated([], () => Object.freeze(['dev', 'docs'])),
+    typedocVersionDefaults: versionDefaults({ typedoc: '0.28.13' }),
     typedocToolPackages: calculated(['intent', 'typedocIntents'], (intent, intents) =>
       hasIntent(intents, intent) ? ['typedoc'] : [], ['toolPackages']),
     'typedoc.entryPoints': calculated(['sourceEntry'], entry => [entry]),
@@ -734,6 +753,6 @@ export function typedoc({ title } = {}) {
     ...commandTargets('typedocDocs', 'docs', 'pnpm exec typedoc', {
       export: { '/repo/docs/': 'docs/' },
     }),
-  })
-  return feature('typedoc', externalValues, module)
+  }
+  return feature('typedoc', inputs, settings)
 }

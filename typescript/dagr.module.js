@@ -1,49 +1,8 @@
-const node = (kind, deps = [], factory, tags = []) => Object.freeze({
-  kind,
-  deps: Object.freeze([...deps]),
-  tags: Object.freeze([...tags]),
-  ...(factory === undefined ? {} : { factory }),
-})
-
-const external = () => node('external')
-const contextual = () => node('contextual')
-const calculated = (deps, factory, tags = []) => node('calculated', deps, factory, tags)
-
-const calculationModule = (name, nodes) => Object.freeze({
-  name,
-  nodes: Object.freeze({ ...nodes }),
-})
-
-function mergeCalculationModules(modules) {
-  const nodes = {}
-  const owners = {}
-  for (const module of modules) {
-    for (const [name, definition] of Object.entries(module.nodes)) {
-      if (Object.hasOwn(nodes, name)) {
-        throw new Error(`Calculation node ${JSON.stringify(name)} is declared by both ${owners[name]} and ${module.name}`)
-      }
-      nodes[name] = definition
-      owners[name] = module.name
-    }
-  }
-  return Object.freeze({
-    nodes: Object.freeze(nodes),
-    owners: Object.freeze(owners),
-  })
-}
-
 const DEFAULT_CONVENTIONS = Object.freeze({
   developmentIntents: Object.freeze(['dev', 'typecheck', 'test', 'lint', 'docs', 'build']),
   distributionIntents: Object.freeze(['pack', 'publish']),
   emissionIntents: Object.freeze(['build', 'pack', 'publish']),
   testSourceIntents: Object.freeze(['dev', 'test', 'lint']),
-  vitestIntents: Object.freeze(['dev', 'test']),
-  vitestDependencyIntents: Object.freeze(['dev', 'test', 'lint']),
-  vitestTypeIntents: Object.freeze(['dev', 'test', 'lint']),
-  prettierIntents: Object.freeze(['dev', 'lint']),
-  eslintIntents: Object.freeze(['dev', 'lint']),
-  typedocIntents: Object.freeze(['dev', 'docs']),
-  viteIntents: Object.freeze(['dev', 'test', 'build']),
   developmentIntentName: 'dev',
   publicationIntentName: 'publish',
   dependencyLocations: Object.freeze(['prod', 'dev']),
@@ -56,15 +15,15 @@ const DEFAULT_CONVENTIONS = Object.freeze({
   javascriptModuleFormat: 'esm',
 })
 
-function conventionModule(overrides = {}) {
+function conventionModule(di, overrides = {}) {
   const unknown = Object.keys(overrides).filter(name => !Object.hasOwn(DEFAULT_CONVENTIONS, name))
   if (unknown.length > 0) {
     throw new Error(`Unknown TypeScript convention${unknown.length === 1 ? '' : 's'} ${unknown.join(', ')}`)
   }
-  return calculationModule('typescript-conventions', Object.fromEntries(
+  return di.module(Object.fromEntries(
     Object.entries(DEFAULT_CONVENTIONS).map(([name, fallback]) => [
       name,
-      calculated([], () => Object.hasOwn(overrides, name) ? overrides[name] : fallback),
+      di.toValue(Object.hasOwn(overrides, name) ? overrides[name] : fallback),
     ]),
   ))
 }
@@ -134,52 +93,70 @@ const dependencyEntries = (name, scope, deps, versions, dependencyLocations, run
 const contributionValues = contributions => Reflect.ownKeys(contributions)
   .map(name => contributions[name])
 
-function aggregateModule() {
-  return calculationModule('feature-contributions', {
-    featureToolPackages: calculated(
+const mergeVersionCatalogs = catalogs => {
+  const versions = {}
+  for (const catalog of catalogs) {
+    for (const [name, version] of Object.entries(catalog)) {
+      if (Object.hasOwn(versions, name) && versions[name] !== version) {
+        throw new Error(`Default version for ${JSON.stringify(name)} has conflicting owners`)
+      }
+      versions[name] = version
+    }
+  }
+  return versions
+}
+
+function aggregateModule(di) {
+  return di.module({
+    featureToolPackages: di.toFun(
       [{ tag: 'toolPackages' }],
       contributions => unique(contributionValues(contributions)),
     ),
-    featureRuntimePackages: calculated(
+    featureRuntimePackages: di.toFun(
       [{ tag: 'runtimePackages' }],
       contributions => unique(contributionValues(contributions)),
     ),
-    featureAmbientTypes: calculated(
+    featureAmbientTypes: di.toFun(
       [{ tag: 'ambientTypes' }],
       contributions => unique(contributionValues(contributions)),
     ),
-    featureGeneratedFiles: calculated(
+    featureGeneratedFiles: di.toFun(
       [{ tag: 'generatedFiles' }],
       contributions => mergeObjects('generated file', contributionValues(contributions)),
     ),
-    featureAllowBuilds: calculated(
+    featureAllowBuilds: di.toFun(
       [{ tag: 'allowBuilds' }],
       contributions => unique(contributionValues(contributions)),
     ),
-    featureValidations: calculated(
+    featureVersionDefaults: di.toFun(
+      [{ tag: 'versionDefaults' }],
+      contributions => mergeVersionCatalogs(contributionValues(contributions)),
+    ),
+    featureValidations: di.toFun(
       [{ tag: 'validations' }],
       contributions => contributionValues(contributions),
     ),
   })
 }
 
-const coreModule = calculationModule('typescript-semantics', {
-  location: external(),
-  scope: external(),
-  version: external(),
-  deps: external(),
-  metadata: external(),
-  versions: external(),
-  intent: contextual(),
-  name: calculated(['location', 'scope'], projectName),
-  slug: calculated(['name'], name => name.slice(name.indexOf('/') + 1)),
-  validatedMetadata: calculated(['name', 'metadata', 'metadataFields'], validateMetadata),
-  sourceLayout: calculated(
+const coreModule = di => di.module({
+  versions: di.toFun(
+    ['stackVersionDefaults', 'featureVersionDefaults', 'configuredVersions'],
+    (stackDefaults, featureDefaults, configured) => ({
+      ...stackDefaults,
+      ...featureDefaults,
+      ...configured,
+    }),
+  ),
+  name: di.toFun(['location', 'scope'], projectName),
+  slug: di.toFun(['name'], name => name.slice(name.indexOf('/') + 1)),
+  validatedMetadata: di.toFun(['name', 'metadata', 'metadataFields'], validateMetadata),
+  sourceLayout: di.toFun(
     ['sourceDirectory', 'entryFile'],
     (directory, entry) => ({ directory, entry }),
   ),
-  sourceEntry: calculated(['sourceLayout'], layout => `${layout.directory}/${layout.entry}`),
-  outputLayout: calculated(
+  sourceEntry: di.toFun(['sourceLayout'], layout => `${layout.directory}/${layout.entry}`),
+  outputLayout: di.toFun(
     ['productKind', 'outputDirectory', 'entryFile'],
     (product, directory, entry) => {
       if (product === 'worker') return undefined
@@ -192,19 +169,19 @@ const coreModule = calculationModule('typescript-semantics', {
       }
     },
   ),
-  distributionIntent: calculated(
+  distributionIntent: di.toFun(
     ['intent', 'distributionIntents'],
     (intent, intents) => intents.includes(intent),
   ),
-  emissionIntent: calculated(
+  emissionIntent: di.toFun(
     ['productKind', 'intent', 'emissionIntents'],
     (product, intent, intents) => product === 'library' && intents.includes(intent),
   ),
-  testSourcesIncluded: calculated(
+  testSourcesIncluded: di.toFun(
     ['productKind', 'intent', 'testSourceIntents'],
     (product, intent, intents) => product !== 'library' || intents.includes(intent),
   ),
-  sourceSet: calculated(
+  sourceSet: di.toFun(
     ['productKind', 'sourceLayout', 'testSourcesIncluded'],
     (product, layout, includeTests) => ({
       include: [`${layout.directory}/**/${product === 'web' ? '*' : '*.ts'}`],
@@ -213,19 +190,19 @@ const coreModule = calculationModule('typescript-semantics', {
         : [`${layout.directory}/**/*.test.ts`, `${layout.directory}/**/*.spec.ts`],
     }),
   ),
-  runtimeEntry: calculated(
+  runtimeEntry: di.toFun(
     ['productKind', 'distributionIntent', 'sourceEntry', 'outputLayout'],
     (product, distribution, source, output) => product === 'library'
       ? `./${distribution ? output.runtimeFile : source}`
       : undefined,
   ),
-  declarationEntry: calculated(
+  declarationEntry: di.toFun(
     ['productKind', 'distributionIntent', 'sourceEntry', 'outputLayout'],
     (product, distribution, source, output) => product === 'library'
       ? `./${distribution ? output.declarationFile : source}`
       : undefined,
   ),
-  emittedArtifacts: calculated(
+  emittedArtifacts: di.toFun(
     ['productKind', 'distributionIntent', 'outputLayout'],
     (product, distribution, output) => {
       if (product === 'web') return [output.directory]
@@ -233,61 +210,61 @@ const coreModule = calculationModule('typescript-semantics', {
       return []
     },
   ),
-  publishable: calculated(
+  publishable: di.toFun(
     ['intent', 'publicationIntentName'],
     (intent, publication) => intent === publication,
   ),
-  sourceMapEmission: calculated(
+  sourceMapEmission: di.toFun(
     ['sourceMapIntent', 'emissionIntent'],
     (requested, emitting) => requested && emitting,
   ),
-  ambientTypes: calculated(['featureAmbientTypes'], types => types),
+  ambientTypes: di.toFun(['featureAmbientTypes'], types => types),
 })
 
-const packageModule = calculationModule('package-json-fields', {
-  dependencyEntries: calculated(
+const packageModule = di => di.module({
+  dependencyEntries: di.toFun(
     ['name', 'scope', 'deps', 'versions', 'dependencyLocations', 'featureRuntimePackages'],
     dependencyEntries,
   ),
-  toolDependencyEntries: calculated(['name', 'versions', 'featureToolPackages'], (name, versions, packages) =>
+  toolDependencyEntries: di.toFun(['name', 'versions', 'featureToolPackages'], (name, versions, packages) =>
     packages.map(pkg => {
       if (versions[pkg] === undefined) throw new Error(`${name}: no version configured for stack dependency ${pkg}`)
       return [pkg, versions[pkg]]
     })),
-  'packageJson.name': calculated(['name'], value => value),
-  'packageJson.version': calculated(['version'], value => value),
-  'packageJson.type': calculated(
+  'packageJson.name': di.toFun(['name'], value => value),
+  'packageJson.version': di.toFun(['version'], value => value),
+  'packageJson.type': di.toFun(
     ['javascriptModuleFormat'],
     format => format === 'esm' ? 'module' : 'commonjs',
   ),
-  'packageJson.private': calculated(['publishable'], value => !value),
-  'packageJson.main': calculated(['runtimeEntry'], value => value),
-  'packageJson.types': calculated(['declarationEntry'], value => value),
-  'packageJson.exports': calculated(
+  'packageJson.private': di.toFun(['publishable'], value => !value),
+  'packageJson.main': di.toFun(['runtimeEntry'], value => value),
+  'packageJson.types': di.toFun(['declarationEntry'], value => value),
+  'packageJson.exports': di.toFun(
     ['runtimeEntry', 'declarationEntry'],
     (runtime, declarations) => runtime === undefined
       ? undefined
       : { '.': { types: declarations, import: runtime } },
   ),
-  'packageJson.files': calculated(
+  'packageJson.files': di.toFun(
     ['productKind', 'distributionIntent', 'emittedArtifacts'],
     (product, distribution, artifacts) => product === 'library' && distribution ? artifacts : undefined,
   ),
-  'packageJson.imports': calculated(
+  'packageJson.imports': di.toFun(
     ['sourceAlias'],
     alias => alias === undefined ? undefined : { [alias.specifier]: alias.sourcePath },
   ),
-  'packageJson.dependencies': calculated(
+  'packageJson.dependencies': di.toFun(
     ['dependencyEntries'],
     entries => Object.fromEntries(entries.prod),
   ),
-  'packageJson.devDependencies': calculated(
+  'packageJson.devDependencies': di.toFun(
     ['intent', 'developmentIntents', 'dependencyEntries', 'toolDependencyEntries'],
     (intent, intents, dependencies, tools) => intents.includes(intent)
       ? Object.fromEntries([...tools, ...dependencies.dev])
       : undefined,
   ),
-  packageJson: calculated(
+  packageJson: di.toFun(
     [
       'validatedMetadata',
       'packageJson.name',
@@ -314,53 +291,53 @@ const packageModule = calculationModule('package-json-fields', {
   ),
 })
 
-const tsconfigModule = calculationModule('tsconfig-fields', {
-  'tsconfig.extends': calculated([], () => '@tsconfig/strictest/tsconfig.json'),
-  'tsconfig.include': calculated(['sourceSet'], value => value.include),
-  'tsconfig.exclude': calculated(['sourceSet'], value => value.exclude),
-  'tsconfig.compilerOptions.rootDir': calculated(['sourceLayout'], value => value.directory),
-  'tsconfig.compilerOptions.outDir': calculated(
+const tsconfigModule = di => di.module({
+  'tsconfig.extends': di.toFun([], () => '@tsconfig/strictest/tsconfig.json'),
+  'tsconfig.include': di.toFun(['sourceSet'], value => value.include),
+  'tsconfig.exclude': di.toFun(['sourceSet'], value => value.exclude),
+  'tsconfig.compilerOptions.rootDir': di.toFun(['sourceLayout'], value => value.directory),
+  'tsconfig.compilerOptions.outDir': di.toFun(
     ['emissionIntent', 'outputLayout'],
     (emit, output) => emit ? output.directory : undefined,
   ),
-  'tsconfig.compilerOptions.target': calculated(['languageTarget'], value => value),
-  'tsconfig.compilerOptions.lib': calculated(['standardLibraries'], value => value),
-  'tsconfig.compilerOptions.module': calculated(['moduleKind'], value => value),
-  'tsconfig.compilerOptions.moduleResolution': calculated(['moduleResolutionKind'], value => value),
-  'tsconfig.compilerOptions.noEmit': calculated(['emissionIntent'], emit => !emit),
-  'tsconfig.compilerOptions.declaration': calculated(
+  'tsconfig.compilerOptions.target': di.toFun(['languageTarget'], value => value),
+  'tsconfig.compilerOptions.lib': di.toFun(['standardLibraries'], value => value),
+  'tsconfig.compilerOptions.module': di.toFun(['moduleKind'], value => value),
+  'tsconfig.compilerOptions.moduleResolution': di.toFun(['moduleResolutionKind'], value => value),
+  'tsconfig.compilerOptions.noEmit': di.toFun(['emissionIntent'], emit => !emit),
+  'tsconfig.compilerOptions.declaration': di.toFun(
     ['productKind', 'emissionIntent'],
     (product, emit) => product === 'library' && emit ? true : undefined,
   ),
-  'tsconfig.compilerOptions.sourceMap': calculated(
+  'tsconfig.compilerOptions.sourceMap': di.toFun(
     ['sourceMapEmission'],
     value => value ? true : undefined,
   ),
-  'tsconfig.compilerOptions.inlineSources': calculated(
+  'tsconfig.compilerOptions.inlineSources': di.toFun(
     ['sourceMapEmission'],
     value => value ? true : undefined,
   ),
-  'tsconfig.compilerOptions.types': calculated(
+  'tsconfig.compilerOptions.types': di.toFun(
     ['ambientTypes'],
     value => value.length > 0 ? value : undefined,
   ),
-  'tsconfig.compilerOptions.paths': calculated(
+  'tsconfig.compilerOptions.paths': di.toFun(
     ['sourceAlias'],
     alias => alias === undefined ? undefined : { [alias.specifier]: [alias.sourcePath] },
   ),
-  'tsconfig.compilerOptions.allowImportingTsExtensions': calculated(
+  'tsconfig.compilerOptions.allowImportingTsExtensions': di.toFun(
     ['productKind'],
     product => product === 'web' ? true : undefined,
   ),
-  'tsconfig.compilerOptions.moduleDetection': calculated(
+  'tsconfig.compilerOptions.moduleDetection': di.toFun(
     ['productKind'],
     product => product === 'web' ? 'force' : undefined,
   ),
-  'tsconfig.compilerOptions.jsx': calculated(
+  'tsconfig.compilerOptions.jsx': di.toFun(
     ['productKind'],
     product => product === 'web' ? 'react-jsx' : undefined,
   ),
-  compilerOptions: calculated(
+  compilerOptions: di.toFun(
     [
       'tsconfig.compilerOptions.rootDir',
       'tsconfig.compilerOptions.outDir',
@@ -387,7 +364,7 @@ const tsconfigModule = calculationModule('tsconfig-fields', {
       ['moduleDetection', moduleDetection], ['jsx', jsx],
     ]),
   ),
-  tsconfig: calculated(
+  tsconfig: di.toFun(
     ['tsconfig.extends', 'tsconfig.include', 'tsconfig.exclude', 'compilerOptions'],
     (extendsConfig, include, exclude, compilerOptions) => present([
       ['extends', extendsConfig], ['include', include], ['exclude', exclude], ['compilerOptions', compilerOptions],
@@ -395,14 +372,14 @@ const tsconfigModule = calculationModule('tsconfig-fields', {
   ),
 })
 
-const workspaceModule = calculationModule('tool-workspaces', {
-  files: calculated(
+const workspaceModule = di => di.module({
+  files: di.toFun(
     ['packageJson', 'tsconfig', 'featureGeneratedFiles'],
     (packageJson, tsconfig, generated) => ({ 'package.json': packageJson, 'tsconfig.json': tsconfig, ...generated }),
   ),
-  allowBuilds: calculated(['featureAllowBuilds'], value => value),
-  output: calculated(['outputLayout'], value => value),
-  workspace: calculated(
+  allowBuilds: di.toFun(['featureAllowBuilds'], value => value),
+  output: di.toFun(['outputLayout'], value => value),
+  workspace: di.toFun(
     [
       'intent', 'name', 'slug', 'packageJson', 'tsconfig', 'files', 'output',
       'allowBuilds', 'buildAssets', 'sourceLayout', 'sourceSet', 'runtimeEntry',
@@ -425,146 +402,91 @@ const workspaceModule = calculationModule('tool-workspaces', {
   ),
 })
 
-function validateFeatures(features) {
-  const duplicate = features.find((feature, index) => features.findIndex(other => other.name === feature.name) !== index)
-  if (duplicate) throw new Error(`TypeScript stack feature ${JSON.stringify(duplicate.name)} was added more than once`)
+export const workspaceKey = (workspace, key) => `${workspace}/${key}`
+
+const workspaceDependency = (workspace, dependency) => typeof dependency === 'object'
+  ? { tag: workspaceKey(workspace, dependency.tag) }
+  : workspaceKey(workspace, dependency)
+
+function qualifyWorkspace(di, workspace, module) {
+  return di.module(Object.fromEntries([...module.keys()].map(name => {
+    const definition = module.definitionOf(name)
+    return [workspaceKey(workspace, name), di.toFun(
+      definition.deps.map(dependency => workspaceDependency(workspace, dependency)),
+      definition.factory,
+      definition.tags.map(tag => workspaceKey(workspace, tag)),
+    )]
+  })))
 }
 
-export function typescriptCalculationGraph(features, conventions = {}) {
-  validateFeatures(features)
-  return mergeCalculationModules([
-    conventionModule(conventions),
-    coreModule,
-    ...features.map(feature => feature.module),
-    aggregateModule(),
-    packageModule,
-    tsconfigModule,
-    workspaceModule,
-  ])
-}
+const valueModule = (di, values) => di.module(Object.fromEntries(
+  Reflect.ownKeys(values).map(name => [name, di.toValue(values[name])]),
+))
 
-const scopedKey = (scope, key) => `${scope}/${key}`
-
-const scopedDependency = (scope, dependency) => typeof dependency === 'object'
-  ? { tag: scopedKey(scope, dependency.tag) }
-  : scopedKey(scope, dependency)
-
-function scopedCalculationModule(di, graph, externalValues, { name: scope, intent }) {
-  return di.module(Object.fromEntries(Object.entries(graph.nodes)
-    .filter(([, definition]) => definition.facet === undefined)
-    .map(([name, definition]) => {
-      const key = scopedKey(scope, name)
-      if (definition.kind === 'external') return [key, di.toValue(externalValues[name])]
-      if (definition.kind === 'contextual') return [key, di.toValue(intent)]
-      return [key, di.toFun(
-        definition.deps.map(dependency => scopedDependency(scope, dependency)),
-        definition.factory,
-        definition.tags.map(tag => scopedKey(scope, tag)),
-      )]
-    })))
-}
-
-function scopedCalculationGraph(graph, contexts) {
-  const nodes = {}
-  const owners = {}
-  for (const context of contexts) {
-    for (const [name, definition] of Object.entries(graph.nodes)) {
-      if (definition.facet !== undefined) continue
-      const key = scopedKey(context.name, name)
-      nodes[key] = definition.kind === 'contextual'
-        ? calculated([], () => context.intent)
-        : node(
-            definition.kind,
-            definition.deps.map(dependency => scopedDependency(context.name, dependency)),
-            definition.factory,
-            definition.tags.map(tag => scopedKey(context.name, tag)),
-          )
-      owners[key] = graph.owners[name]
-    }
+function workspaceTemplate(di, inputs, intent, features, conventions) {
+  let module = valueModule(di, { ...inputs, intent })
+    .merge(conventionModule(di, conventions))
+    .merge(coreModule(di))
+    .merge(aggregateModule(di))
+    .merge(packageModule(di))
+    .merge(tsconfigModule(di))
+    .merge(workspaceModule(di))
+  for (const feature of features) {
+    module = module
+      .merge(valueModule(di, feature.inputs))
+      .merge(di.module(feature.settings))
   }
-  return Object.freeze({ nodes: Object.freeze(nodes), owners: Object.freeze(owners) })
+  return module
 }
 
-const inferredIntent = context => {
-  const [facet, name] = context.split(':', 2)
+const intentForWorkspace = workspace => {
+  const [facet, name] = workspace.split(':', 2)
   if (facet === 'publish') return 'publish'
   if (facet === 'dev' || name === 'dev') return 'dev'
   return name
 }
 
-export function typescriptProgram(di, {
+export function typescriptModule(di, {
   location,
   scope,
   version,
   deps = [],
   metadata = {},
   versions,
+  defaultVersions = {},
   features,
   conventions = {},
   dagrRuntime,
 }) {
-  const template = typescriptCalculationGraph(features, conventions)
-  const externalValues = {
+  const inputs = {
     location,
     scope,
     version,
     deps,
     metadata,
-    versions,
-    ...Object.assign({}, ...features.map(feature => feature.externalValues)),
+    configuredVersions: versions ?? {},
+    stackVersionDefaults: defaultVersions,
   }
 
-  const targetEntries = Object.entries(template.nodes)
-    .filter(([, definition]) => definition.facet !== undefined)
-  const contextsByName = new Map([
-    ['dev:sync', { name: 'dev:sync', intent: 'dev' }],
-    ['config:dev', { name: 'config:dev', intent: 'dev' }],
-  ])
-  const addContext = context => {
-    const existing = contextsByName.get(context.name)
-    if (existing && existing.intent !== context.intent) {
-      throw new Error(`Configuration ${JSON.stringify(context.name)} has conflicting intents`)
-    }
-    contextsByName.set(context.name, context)
-  }
-  for (const [, definition] of targetEntries) {
+  let targets = di.module({ '#dagrRuntime': di.toValue(dagrRuntime) })
+  for (const feature of features) targets = targets.merge(di.module(feature.targets))
+
+  const workspaces = new Set(['dev:sync', 'config:dev'])
+  for (const name of targets.keys()) {
+    const definition = targets.definitionOf(name)
     for (const dependency of definition.deps) {
       if (typeof dependency !== 'string' || !dependency.endsWith('/workspace')) continue
-      const name = dependency.slice(0, -'/workspace'.length)
-      addContext({ name, intent: inferredIntent(name) })
+      workspaces.add(dependency.slice(0, -'/workspace'.length))
     }
   }
-  const contexts = Object.freeze([...contextsByName.values()].map(Object.freeze))
-  let module = di.module({ dagrRuntime: di.toValue(dagrRuntime) })
-  for (const context of contexts) {
-    module = module.merge(scopedCalculationModule(di, template, externalValues, context))
+
+  let module = targets
+  for (const workspace of workspaces) {
+    module = module.merge(qualifyWorkspace(
+      di,
+      workspace,
+      workspaceTemplate(di, inputs, intentForWorkspace(workspace), features, conventions),
+    ))
   }
-  module = module.merge(di.module(Object.fromEntries(targetEntries.map(([name, definition]) => [
-    name,
-    di.toFun(definition.deps, definition.factory, definition.tags),
-  ]))))
-
-  const scopedGraph = scopedCalculationGraph(template, contexts)
-  const graph = Object.freeze({
-    nodes: Object.freeze({
-      ...scopedGraph.nodes,
-      ...Object.fromEntries(targetEntries),
-    }),
-    owners: Object.freeze({
-      ...scopedGraph.owners,
-      ...Object.fromEntries(targetEntries.map(([name]) => [name, template.owners[name]])),
-    }),
-  })
-  const facets = Object.freeze(Object.fromEntries(targetEntries.map(([, definition]) => [
-    definition.facet.name,
-    definition.facet,
-  ])))
-
-  return Object.freeze({
-    graph,
-    module,
-    contexts,
-    facets,
-    key: scopedKey,
-  })
+  return module
 }

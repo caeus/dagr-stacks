@@ -23,8 +23,8 @@ second boolean that can contradict it. A publishing location owns registry visib
 location-specific policy.
 
 [`typescript`](typescript/) is the composable stack. Its library, Cloudflare worker, Vite React,
-test, lint, format, and documentation modules merge into one explicit calculation DAG. `ts-library`
-is retained as the earlier, target-parameterized implementation.
+test, lint, format, and documentation definitions merge into one native DI module. `ts-library` is
+retained as the earlier, target-parameterized implementation.
 
 ## Convention
 

@@ -1,9 +1,31 @@
-const node = (kind, deps = [], factory, tags = []) => Object.freeze({
-  kind,
-  deps: Object.freeze([...deps]),
-  tags: Object.freeze([...tags]),
-  ...(factory === undefined ? {} : { factory }),
-})
+const facetsByName = new Map()
+const facetsByTargetTag = new Map()
+
+export function facet(name) {
+  if (!name) throw new Error('TypeScript facet needs a name')
+  if (facetsByName.has(name)) return facetsByName.get(name)
+  const value = Object.freeze({ name, targets: Symbol(`${name} targets`) })
+  facetsByName.set(name, value)
+  facetsByTargetTag.set(value.targets, value)
+  return value
+}
+
+export const configFacet = facet('config')
+export const devFacet = facet('dev')
+export const ciFacet = facet('ci')
+export const publishFacet = facet('publish')
+
+const node = (kind, deps = [], factory, tags = []) => {
+  const targetFacets = tags.map(tag => facetsByTargetTag.get(tag)).filter(Boolean)
+  if (targetFacets.length > 1) throw new Error('A target setting cannot belong to multiple facets')
+  return Object.freeze({
+    kind,
+    deps: Object.freeze([...deps]),
+    tags: Object.freeze([...tags]),
+    ...(targetFacets.length === 0 ? {} : { facet: targetFacets[0] }),
+    ...(factory === undefined ? {} : { factory }),
+  })
+}
 
 const external = () => node('external')
 const calculated = (deps, factory, tags = []) => node('calculated', deps, factory, tags)
@@ -28,18 +50,13 @@ export const requires = (...dependencies) => setting(
   { tags: ['validations'] },
 )
 
-export function target(name, { kind = 'command', deps = [], ...options } = {}) {
-  const separator = name.indexOf(':')
-  if (separator <= 0 || separator === name.length - 1) {
-    throw new Error(`TypeScript feature target must be facet:name, got ${JSON.stringify(name)}`)
-  }
+export function target(name, { deps = [], run } = {}) {
+  if (!name) throw new Error('TypeScript target needs a name')
+  if (typeof run !== 'function') throw new Error(`TypeScript target ${JSON.stringify(name)} needs run`)
   return Object.freeze({
-    facet: name.slice(0, separator),
-    name: name.slice(separator + 1),
-    intent: options.intent ?? (name.startsWith('publish:') ? 'publish' : name.slice(separator + 1)),
-    kind,
-    ...Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'intent')),
+    name,
     deps: Object.freeze([...deps]),
+    run,
   })
 }
 
@@ -60,7 +77,7 @@ const hasIntent = (intents, intent) => intents.includes(intent)
 const contributedTargetNames = contributions => Reflect.ownKeys(contributions)
   .map(name => contributions[name])
   .filter(target => target !== undefined)
-  .map(target => `${target.facet}:${target.name}`)
+  .map(target => target.name)
 
 const mergeRecords = (label, records) => {
   const result = {}
@@ -74,6 +91,141 @@ const mergeRecords = (label, records) => {
   }
   return result
 }
+
+const copySource = directory => ({ COPY: { src: directory, dest: `/repo/${directory}` } })
+const copyAssets = assets => assets.map(path => ({ COPY: { src: path, dest: `/repo/${path}` } }))
+
+const configurationTarget = (name, workspace, runtime) => target(name, {
+  deps: [runtime.base],
+  run: ({ images }) => ({
+    FROM: images[runtime.base],
+    steps: [
+      { WORKDIR: '/repo' },
+      ...Object.entries(workspace.files).map(([path, value]) => runtime.writeProjectedFile(path, value)),
+    ],
+    IGNORE: runtime.ignore,
+  }),
+})
+
+const installTarget = (name, workspace, runtime) => target(`install-${name}`, {
+  deps: [`config:${name}`, ...runtime.packTargets],
+  run: ({ images }) => ({
+    FROM: images[`config:${name}`],
+    steps: [
+      ...runtime.localDeps.map(dependency => ({
+        COPY: { from: images[runtime.packTarget(dependency)], src: '/out', dest: '/repo' },
+      })),
+      { WORKDIR: '/repo' },
+      runtime.writeText('/repo/.pnpmfile.cjs', runtime.pnpmfile(runtime.scope)),
+      ...(workspace.allowBuilds.length > 0
+        ? [runtime.writeYaml('/repo/pnpm-workspace.yaml', {
+            allowBuilds: Object.fromEntries(workspace.allowBuilds.map(pkg => [pkg, true])),
+          })]
+        : []),
+      { RUN: 'pnpm install --prod=false' },
+    ],
+    IGNORE: runtime.ignore,
+  }),
+})
+
+const commandTarget = (name, command, workspace, runtime, dependencies, { assets = false, export: output } = {}) =>
+  target(name, {
+    deps: [`install-${name}`, ...contributedTargetNames(dependencies)],
+    run: ({ images }) => ({
+      FROM: images[`install-${name}`],
+      steps: [
+        copySource(workspace.semantics.sourceLayout.directory),
+        ...(assets ? copyAssets(workspace.buildAssets) : []),
+        { WORKDIR: '/repo' },
+        { RUN: command },
+      ],
+      IGNORE: runtime.ignore,
+      ...(output ? { EXPORT: output } : {}),
+    }),
+  })
+
+const commandTargets = (prefix, name, command, {
+  assets = false,
+  buildDependency = false,
+  dependencies = false,
+  enabled,
+  export: output,
+} = {}) => {
+  const enabledDeps = enabled ? [enabled] : []
+  const enabledFactory = factory => (...values) => {
+    const isEnabled = enabled ? values.shift() : true
+    return isEnabled ? factory(...values) : undefined
+  }
+  return {
+    [`${prefix}ConfigTarget`]: calculated(
+      [...enabledDeps, `config:${name}/workspace`, 'dagrRuntime'],
+      enabledFactory((workspace, runtime) => configurationTarget(name, workspace, runtime)),
+      [configFacet.targets],
+    ),
+    [`${prefix}InstallTarget`]: calculated(
+      [...enabledDeps, `config:${name}/workspace`, 'dagrRuntime'],
+      enabledFactory((workspace, runtime) => installTarget(name, workspace, runtime)),
+      [ciFacet.targets],
+    ),
+    [`${prefix}Target`]: calculated(
+      [
+        ...enabledDeps,
+        ...(dependencies ? [{ tag: 'buildDependencies' }] : []),
+        `ci:${name}/workspace`,
+        'dagrRuntime',
+      ],
+      enabledFactory((...values) => {
+        const runtime = values.pop()
+        const workspace = values.pop()
+        const runtimeDependencies = dependencies ? values.pop() : {}
+        return commandTarget(name, command, workspace, runtime, runtimeDependencies, { assets, export: output })
+      }),
+      [ciFacet.targets, ...(buildDependency ? ['buildDependencies'] : [])],
+    ),
+  }
+}
+
+const packTarget = (name, workspace, runtime, dependencies, { dependencyFacet } = {}) => {
+  const dependencyNames = contributedTargetNames(dependencies)
+    .map(dependency => dependencyFacet ? `${dependencyFacet}:${dependency}` : dependency)
+  return target(name, {
+    deps: [...dependencyNames, ...runtime.packTargets],
+    run: ({ images }) => ({
+      FROM: images[dependencyNames[0]],
+      steps: [
+        ...runtime.localDeps.map(dependency => ({
+          COPY: { from: images[runtime.packTarget(dependency)], src: '/out', dest: '/out' },
+        })),
+        { WORKDIR: '/repo' },
+        runtime.writeJson('/repo/package.json', workspace.packageJson),
+        { RUN: `mkdir -p /tmp/pack /out && pnpm pack --pack-destination /tmp/pack && mv /tmp/pack/*.tgz /out/${workspace.slug}.tgz` },
+      ],
+      IGNORE: runtime.ignore,
+    }),
+  })
+}
+
+const hostInstallTarget = (name, workspace, runtime) => target(name, {
+  deps: ['config:dev', ...runtime.packTargets],
+  run: ({ images, host }) => ({
+    FROM: images['config:dev'],
+    steps: [
+      ...runtime.localDeps.map(dependency => ({
+        COPY: { from: images[runtime.packTarget(dependency)], src: '/out', dest: '/repo' },
+      })),
+      { WORKDIR: '/repo' },
+      runtime.writeText('/repo/.pnpmfile.cjs', runtime.pnpmfile(runtime.scope)),
+      ...(workspace.allowBuilds.length > 0
+        ? [runtime.writeYaml('/repo/pnpm-workspace.yaml', {
+            allowBuilds: Object.fromEntries(workspace.allowBuilds.map(pkg => [pkg, true])),
+          })]
+        : []),
+      { RUN: `pnpm install --prod=false --os ${host.os} --cpu ${host.arch}` },
+    ],
+    IGNORE: runtime.ignore,
+    EXPORT: { '/repo/node_modules': 'node_modules' },
+  }),
+})
 
 export function library({
   runtime = 'portable',
@@ -119,29 +271,22 @@ export function library({
     productRuntimePackages: calculated([], () => [], ['runtimePackages']),
     productAllowBuilds: calculated([], () => [], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
-    libraryTypecheckTarget: calculated(
-      [],
-      () => target('ci:typecheck', { command: 'pnpm exec tsc --noEmit' }),
-      ['targets'],
-    ),
-    libraryBuildTarget: calculated(
-      [{ tag: 'buildDependencies' }],
-      dependencies => target('ci:build', {
-        command: 'pnpm exec tsc',
-        assets: true,
-        deps: contributedTargetNames(dependencies),
-      }),
-      ['targets'],
-    ),
+    ...commandTargets('libraryTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
+    ...commandTargets('libraryBuild', 'build', 'pnpm exec tsc', {
+      assets: true,
+      dependencies: true,
+    }),
     libraryCiPackTarget: calculated(
-      [],
-      () => target('ci:pack', { kind: 'pack', deps: ['ci:build'] }),
-      ['targets'],
+      ['libraryBuildTarget', 'ci:pack/workspace', 'dagrRuntime'],
+      (build, workspace, runtime) => packTarget('pack', workspace, runtime, { build }),
+      [ciFacet.targets],
     ),
     libraryPublishPackTarget: calculated(
-      [],
-      () => target('publish:pack', { kind: 'pack', deps: ['ci:build'] }),
-      ['targets'],
+      ['libraryBuildTarget', 'publish:pack/workspace', 'dagrRuntime'],
+      (build, workspace, runtime) => packTarget('pack', workspace, runtime, { build }, {
+        dependencyFacet: ciFacet.name,
+      }),
+      [publishFacet.targets],
     ),
   })
   return feature('library', externalValues, module)
@@ -176,11 +321,7 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
     productRuntimePackages: calculated([], () => [], ['runtimePackages']),
     productAllowBuilds: calculated([], () => ['sharp', 'workerd'], ['allowBuilds']),
     buildAssets: calculated(['buildAssetInputs'], assets => assets),
-    cloudflareTypecheckTarget: calculated(
-      [],
-      () => target('ci:typecheck', { command: 'pnpm exec tsc --noEmit' }),
-      ['targets'],
-    ),
+    ...commandTargets('cloudflareTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
   })
   return feature('cloudflare-worker', externalValues, module)
 }
@@ -251,21 +392,16 @@ export default defineConfig({
       config => config === undefined ? {} : { 'vite.config.ts': config },
       ['generatedFiles'],
     ),
-    viteTypecheckTarget: calculated(
-      [],
-      () => target('ci:typecheck', { command: 'pnpm exec tsc --noEmit' }),
-      ['targets'],
+    ...commandTargets('viteTypecheck', 'typecheck', 'pnpm exec tsc --noEmit'),
+    ...commandTargets('viteBuild', 'build', 'pnpm exec vite build', {
+      assets: true,
+      dependencies: true,
+    }),
+    viteDevInstallTarget: calculated(
+      ['config:dev/workspace', 'dagrRuntime'],
+      (workspace, runtime) => hostInstallTarget('install', workspace, runtime),
+      [devFacet.targets],
     ),
-    viteBuildTarget: calculated(
-      [{ tag: 'buildDependencies' }],
-      dependencies => target('ci:build', {
-        command: 'pnpm exec vite build',
-        assets: true,
-        deps: contributedTargetNames(dependencies),
-      }),
-      ['targets'],
-    ),
-    viteDevInstallTarget: calculated([], () => target('dev:install', { kind: 'dev-install' }), ['targets']),
   })
   return feature('vite-react', externalValues, module)
 }
@@ -349,15 +485,10 @@ export function biome({ formatter = true, linter = true } = {}) {
         config => config === undefined ? {} : { 'biome.json': config },
         { tags: ['generatedFiles'] },
       ),
-      biomeLintTarget: setting(
-        ['biomeLinterIntent'],
-        enabled => enabled
-          ? target('ci:lint', {
-              command: 'pnpm exec biome check .',
-            })
-          : undefined,
-        { tags: ['targets', 'buildDependencies'] },
-      ),
+      ...commandTargets('biomeLint', 'lint', 'pnpm exec biome check .', {
+        buildDependency: true,
+        enabled: 'ci:lint/biomeLinterIntent',
+      }),
     },
   })
 }
@@ -431,13 +562,9 @@ export default defineConfig({ test: {
       ['generatedFiles'],
     ),
     vitestAllowBuilds: calculated([], () => ['esbuild'], ['allowBuilds']),
-    vitestTestTarget: calculated(
-      [],
-      () => target('ci:test', {
-        command: 'pnpm exec vitest run',
-      }),
-      ['targets', 'buildDependencies'],
-    ),
+    ...commandTargets('vitestTest', 'test', 'pnpm exec vitest run', {
+      buildDependency: true,
+    }),
   })
   return feature('vitest', externalValues, module)
 }
@@ -556,13 +683,9 @@ export default [
       config => config === undefined ? {} : { 'eslint.config.mjs': config },
       ['generatedFiles'],
     ),
-    eslintLintTarget: calculated(
-      [],
-      () => target('ci:lint', {
-        command: 'pnpm exec eslint .',
-      }),
-      ['targets', 'buildDependencies'],
-    ),
+    ...commandTargets('eslintLint', 'lint', 'pnpm exec eslint .', {
+      buildDependency: true,
+    }),
   })
   return feature('eslint', externalValues, module)
 }
@@ -608,14 +731,9 @@ export function typedoc({ title } = {}) {
       config => config === undefined ? {} : { 'typedoc.json': config },
       ['generatedFiles'],
     ),
-    typedocDocsTarget: calculated(
-      [],
-      () => target('ci:docs', {
-        command: 'pnpm exec typedoc',
-        export: { '/repo/docs/': 'docs/' },
-      }),
-      ['targets'],
-    ),
+    ...commandTargets('typedocDocs', 'docs', 'pnpm exec typedoc', {
+      export: { '/repo/docs/': 'docs/' },
+    }),
   })
   return feature('typedoc', externalValues, module)
 }

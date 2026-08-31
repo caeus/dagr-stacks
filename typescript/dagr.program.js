@@ -32,33 +32,6 @@ function mergeCalculationModules(modules) {
   })
 }
 
-function compileCalculationGraph(graph, di, externalValues, contextualValues, roots) {
-  const sourceModule = kind => di.module(Object.fromEntries(
-    Object.entries(graph.nodes)
-      .filter(([, definition]) => definition.kind === kind)
-      .map(([name]) => {
-        const values = kind === 'external' ? externalValues : contextualValues
-        if (!Object.hasOwn(values, name)) {
-          throw new Error(`Missing ${kind} calculation node ${JSON.stringify(name)}`)
-        }
-        return [name, di.toValue(values[name])]
-      }),
-  ))
-  const calculations = di.module(Object.fromEntries(
-    Object.entries(graph.nodes)
-      .filter(([, definition]) => definition.kind === 'calculated')
-      .map(([name, definition]) => [
-        name,
-        di.toFun(definition.deps, definition.factory, definition.tags),
-      ]),
-  ))
-  return sourceModule('external')
-    .merge(sourceModule('contextual'))
-    .merge(calculations)
-    .shake(roots)
-    .compile()
-}
-
 const DEFAULT_CONVENTIONS = Object.freeze({
   developmentIntents: Object.freeze(['dev', 'typecheck', 'test', 'lint', 'docs', 'build']),
   distributionIntents: Object.freeze(['pack', 'publish']),
@@ -161,19 +134,6 @@ const dependencyEntries = (name, scope, deps, versions, dependencyLocations, run
 const contributionValues = contributions => Reflect.ownKeys(contributions)
   .map(name => contributions[name])
 
-const mergeTargets = contributions => {
-  const targets = {}
-  for (const contribution of contributions) {
-    if (contribution === undefined) continue
-    const key = `${contribution.facet}:${contribution.name}`
-    if (Object.hasOwn(targets, key)) {
-      throw new Error(`target contribution ${JSON.stringify(key)} has more than one owner`)
-    }
-    targets[key] = contribution
-  }
-  return targets
-}
-
 function aggregateModule() {
   return calculationModule('feature-contributions', {
     featureToolPackages: calculated(
@@ -195,10 +155,6 @@ function aggregateModule() {
     featureAllowBuilds: calculated(
       [{ tag: 'allowBuilds' }],
       contributions => unique(contributionValues(contributions)),
-    ),
-    featureTargets: calculated(
-      [{ tag: 'targets' }],
-      contributions => mergeTargets(contributionValues(contributions)),
     ),
     featureValidations: calculated(
       [{ tag: 'validations' }],
@@ -494,16 +450,18 @@ const scopedDependency = (scope, dependency) => typeof dependency === 'object'
   : scopedKey(scope, dependency)
 
 function scopedCalculationModule(di, graph, externalValues, { name: scope, intent }) {
-  return di.module(Object.fromEntries(Object.entries(graph.nodes).map(([name, definition]) => {
-    const key = scopedKey(scope, name)
-    if (definition.kind === 'external') return [key, di.toValue(externalValues[name])]
-    if (definition.kind === 'contextual') return [key, di.toValue(intent)]
-    return [key, di.toFun(
-      definition.deps.map(dependency => scopedDependency(scope, dependency)),
-      definition.factory,
-      definition.tags.map(tag => scopedKey(scope, tag)),
-    )]
-  })))
+  return di.module(Object.fromEntries(Object.entries(graph.nodes)
+    .filter(([, definition]) => definition.facet === undefined)
+    .map(([name, definition]) => {
+      const key = scopedKey(scope, name)
+      if (definition.kind === 'external') return [key, di.toValue(externalValues[name])]
+      if (definition.kind === 'contextual') return [key, di.toValue(intent)]
+      return [key, di.toFun(
+        definition.deps.map(dependency => scopedDependency(scope, dependency)),
+        definition.factory,
+        definition.tags.map(tag => scopedKey(scope, tag)),
+      )]
+    })))
 }
 
 function scopedCalculationGraph(graph, contexts) {
@@ -511,6 +469,7 @@ function scopedCalculationGraph(graph, contexts) {
   const owners = {}
   for (const context of contexts) {
     for (const [name, definition] of Object.entries(graph.nodes)) {
+      if (definition.facet !== undefined) continue
       const key = scopedKey(context.name, name)
       nodes[key] = definition.kind === 'contextual'
         ? calculated([], () => context.intent)
@@ -526,7 +485,12 @@ function scopedCalculationGraph(graph, contexts) {
   return Object.freeze({ nodes: Object.freeze(nodes), owners: Object.freeze(owners) })
 }
 
-const targetName = target => `${target.facet}:${target.name}`
+const inferredIntent = context => {
+  const [facet, name] = context.split(':', 2)
+  if (facet === 'publish') return 'publish'
+  if (facet === 'dev' || name === 'dev') return 'dev'
+  return name
+}
 
 export function typescriptProgram(di, {
   location,
@@ -537,6 +501,7 @@ export function typescriptProgram(di, {
   versions,
   features,
   conventions = {},
+  dagrRuntime,
 }) {
   const template = typescriptCalculationGraph(features, conventions)
   const externalValues = {
@@ -549,14 +514,8 @@ export function typescriptProgram(di, {
     ...Object.assign({}, ...features.map(feature => feature.externalValues)),
   }
 
-  const discovered = compileCalculationGraph(
-    template,
-    di,
-    externalValues,
-    { intent: 'dev' },
-    ['featureTargets'],
-  )
-  const targets = Object.freeze(Object.values(discovered.featureTargets))
+  const targetEntries = Object.entries(template.nodes)
+    .filter(([, definition]) => definition.facet !== undefined)
   const contextsByName = new Map([
     ['dev:sync', { name: 'dev:sync', intent: 'dev' }],
     ['config:dev', { name: 'config:dev', intent: 'dev' }],
@@ -568,23 +527,44 @@ export function typescriptProgram(di, {
     }
     contextsByName.set(context.name, context)
   }
-  for (const target of targets) {
-    addContext({ name: targetName(target), intent: target.intent })
-    if (target.kind === 'command') {
-      addContext({ name: `config:${target.name}`, intent: target.intent })
+  for (const [, definition] of targetEntries) {
+    for (const dependency of definition.deps) {
+      if (typeof dependency !== 'string' || !dependency.endsWith('/workspace')) continue
+      const name = dependency.slice(0, -'/workspace'.length)
+      addContext({ name, intent: inferredIntent(name) })
     }
   }
   const contexts = Object.freeze([...contextsByName.values()].map(Object.freeze))
-  let module = di.module({})
+  let module = di.module({ dagrRuntime: di.toValue(dagrRuntime) })
   for (const context of contexts) {
     module = module.merge(scopedCalculationModule(di, template, externalValues, context))
   }
+  module = module.merge(di.module(Object.fromEntries(targetEntries.map(([name, definition]) => [
+    name,
+    di.toFun(definition.deps, definition.factory, definition.tags),
+  ]))))
+
+  const scopedGraph = scopedCalculationGraph(template, contexts)
+  const graph = Object.freeze({
+    nodes: Object.freeze({
+      ...scopedGraph.nodes,
+      ...Object.fromEntries(targetEntries),
+    }),
+    owners: Object.freeze({
+      ...scopedGraph.owners,
+      ...Object.fromEntries(targetEntries.map(([name]) => [name, template.owners[name]])),
+    }),
+  })
+  const facets = Object.freeze(Object.fromEntries(targetEntries.map(([, definition]) => [
+    definition.facet.name,
+    definition.facet,
+  ])))
 
   return Object.freeze({
-    graph: scopedCalculationGraph(template, contexts),
+    graph,
     module,
     contexts,
-    targets,
+    facets,
     key: scopedKey,
   })
 }

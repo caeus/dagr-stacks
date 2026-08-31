@@ -102,10 +102,15 @@ describe('composable TypeScript workspaces', () => {
     assert.deepEqual(graph.nodes[dev('vitestAmbientTypes')].tags, [dev('ambientTypes')])
     assert.deepEqual(graph.nodes[dev('vitestAllowBuilds')].tags, [dev('allowBuilds')])
     assert.deepEqual(graph.nodes[dev('featureToolPackages')].deps, [{ tag: dev('toolPackages') }])
-    assert.deepEqual(graph.nodes[dev('featureTargets')].deps, [{ tag: dev('targets') }])
     assert.deepEqual(graph.nodes[dev('featureValidations')].deps, [{ tag: dev('validations') }])
-    assert.deepEqual(graph.nodes[dev('libraryBuildTarget')].deps, [{ tag: dev('buildDependencies') }])
-    assert.deepEqual(graph.nodes[dev('vitestTestTarget')].tags, [dev('targets'), dev('buildDependencies')])
+    assert.deepEqual(graph.nodes.libraryBuildTarget.deps, [
+      { tag: 'buildDependencies' },
+      'ci:build/workspace',
+      'dagrRuntime',
+    ])
+    assert.equal(graph.nodes.vitestTestTarget.facet.name, 'ci')
+    assert.equal(graph.nodes.vitestTestTarget.tags[0].description, 'ci targets')
+    assert.equal(graph.nodes.vitestTestTarget.tags[1], 'buildDependencies')
     assert.equal(graph.nodes[dev('libraryTsconfig')], undefined)
     assert.equal(graph.nodes[dev('featurePackageFields')], undefined)
     assert.equal(graph.contributions, undefined)
@@ -254,25 +259,14 @@ describe('composable TypeScript workspaces', () => {
     assert.equal(graph.owners['dev:sync/biomeConfig'], 'biome')
     assert.deepEqual(graph.nodes['dev:sync/biomeToolPackages'].tags, ['dev:sync/toolPackages'])
     assert.deepEqual(graph.nodes['dev:sync/biomeGeneratedFiles'].tags, ['dev:sync/generatedFiles'])
-    assert.deepEqual(graph.nodes['dev:sync/biomeLintTarget'].tags, [
-      'dev:sync/targets',
-      'dev:sync/buildDependencies',
-    ])
+    assert.equal(graph.nodes.biomeLintTarget.facet.name, 'ci')
+    assert.equal(graph.nodes.biomeLintTarget.tags[0].description, 'ci targets')
+    assert.equal(graph.nodes.biomeLintTarget.tags[1], 'buildDependencies')
     assert.equal(dev.packageJson.devDependencies['@biomejs/biome'], '2')
     assert.deepEqual(dev.files['biome.json'], {
       formatter: { enabled: true },
       linter: { enabled: true },
     })
-    const targets = programFor([library(), biome()]).targets
-    assert.equal(targets.find(target => target.name === 'lint').command, 'pnpm exec biome check .')
-    assert.deepEqual(targets.find(target => target.name === 'build').deps, ['ci:lint'])
-  })
-
-  it('rejects two feature targets claiming the same facet and name', () => {
-    assert.throws(
-      () => programFor([library(), biome(), eslint()]),
-      /target contribution "ci:lint" has more than one owner/,
-    )
   })
 
   it('lets features extend ESLint rules through settings and fails without ESLint', () => {

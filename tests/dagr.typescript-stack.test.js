@@ -76,25 +76,69 @@ describe('mountable TypeScript stack', () => {
       .with(stack.vitest())
     const index = project({ location: '//example', version: '1.0.0' })
 
-    assert.deepEqual(Object.keys(index.config), ['dev', 'typecheck', 'test', 'build'])
-    assert.deepEqual(Object.keys(index.ci), [
+    assert.deepEqual(Object.keys(index.config).sort(), ['build', 'dev', 'test', 'typecheck'])
+    assert.deepEqual(Object.keys(index.ci).sort(), [
+      'build',
       'install-typecheck',
       'install-test',
       'install-build',
-      'typecheck',
-      'test',
-      'build',
       'pack',
-    ])
+      'test',
+      'typecheck',
+    ].sort())
     assert.deepEqual(Object.keys(index.publish), ['pack'])
+    assert.equal(index.ci.test.name, 'test')
+    assert.deepEqual([...index.ci.test.deps], ['install-test'])
+    assert.equal(typeof index.ci.test.run, 'function')
     assert.equal(calculations.nodes['dev:sync/intent'].kind, 'calculated')
     assert.equal(calculations.nodes['dev:sync/intent'].deps.length, 0)
     assert.equal(calculations.nodes.index.deps[0].tag.description, 'typescript facets')
     const ciTargets = calculations.nodes['facet:ci'].deps[0].tag
-    assert.equal(ciTargets.description, 'typescript ci targets')
-    assert.ok(calculations.nodes['target:ci:test'].tags.includes(ciTargets))
+    assert.equal(ciTargets.description, 'ci targets')
+    assert.ok(calculations.nodes.vitestTestTarget.tags.includes(ciTargets))
     const sourceCopy = index.ci.typecheck.run({ images: { 'install-typecheck': 'image' } }).steps[0]
     assert.equal(sourceCopy.COPY.src, 'source')
     assert.equal(sourceCopy.COPY.dest, '/repo/source')
+    assert.deepEqual([...index.publish.pack.deps], ['ci:build'])
+    assert.equal(index.publish.pack.run({ images: { 'ci:build': 'build-image' } }).FROM, 'build-image')
+
+    const qualityFacet = stack.facet('quality')
+    const health = stack.defineFeature('health', {
+      settings: {
+        healthTarget: stack.setting([], () => stack.target('health', {
+          deps: [],
+          run: () => ({ FROM: 'scratch', steps: [], IGNORE: [] }),
+        }), { tags: [qualityFacet.targets] }),
+      },
+    })
+    const extended = stack.default({ base: 'base', versions })
+      .with(stack.library())
+      .with(health)
+    assert.equal(extended({ location: '//example' }).quality.health.name, 'health')
+
+    const first = stack.defineFeature('first-target', {
+      settings: {
+        firstTarget: stack.setting([], () => stack.target('same', {
+          deps: [],
+          run: () => ({ FROM: 'scratch', steps: [], IGNORE: [] }),
+        }), { tags: [stack.ciFacet.targets] }),
+      },
+    })
+    const second = stack.defineFeature('second-target', {
+      settings: {
+        secondTarget: stack.setting([], () => stack.target('same', {
+          deps: [],
+          run: () => ({ FROM: 'scratch', steps: [], IGNORE: [] }),
+        }), { tags: [stack.ciFacet.targets] }),
+      },
+    })
+    const conflicting = stack.default({ base: 'base', versions })
+      .with(stack.library())
+      .with(first)
+      .with(second)
+    assert.throws(
+      () => conflicting({ location: '//example', version: '1.0.0' }),
+      /target "same" has more than one owner/,
+    )
   })
 })

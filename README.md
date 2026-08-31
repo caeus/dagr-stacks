@@ -11,8 +11,8 @@ makes a particular package different.
 Stacks accept project facts and developer intent, then calculate generated configuration and the
 complete Dagr target index. Generated files are outputs, not canonical project truth.
 
-The calculation itself is an explicit DAG. Each node comes from external configuration, target
-intent, or a calculation over named dependency nodes. Targets collect into facets through DI tags;
+The calculation itself is an explicit DAG. Each node comes from external configuration, workspace
+context, or a calculation over named dependency nodes. Targets collect into facets through DI tags;
 facets collect into the root index. Target selection happens later, in Dagr, and never enters the
 stack DI.
 
@@ -69,6 +69,7 @@ reviewable build inputs.
 | Component | Description |
 | --- | --- |
 | [`di`](di/) | Immutable, synchronous dependency-injection graph for inline JavaScript composition |
+| [`typescript`](typescript/) | Composable TypeScript products and capabilities with generated configuration and tagged targets |
 | [`ts-library`](ts-library/) | Curried TypeScript library stack with generated manifests, build, pack, typecheck, and local dependency tarballs |
 
 Stacks stay together here until one genuinely requires separate ownership, permissions, or release

@@ -108,9 +108,9 @@ typescript({
 | --- | --- |
 | Conventions | `developmentIntents`, `distributionIntents`, `emissionIntents`, `testSourceIntents`, `vitestIntents`, `vitestDependencyIntents`, `vitestTypeIntents`, `eslintIntents`, `typedocIntents`, `viteIntents`, `developmentIntentName`, `publicationIntentName`, `dependencyLocations`, `metadataFields`, `sourceDirectory`, `entryFile`, `outputDirectory`, `javascriptModuleFormat` |
 | External package facts | `location`, `scope`, `version`, `deps`, `metadata`, `versions` |
-| Target-derived setting | `intent` |
+| Workspace context | `intent` |
 | Semantic calculations | `name`, `slug`, `validatedMetadata`, `sourceLayout`, `sourceEntry`, `outputLayout`, `distributionIntent`, `emissionIntent`, `testSourcesIncluded`, `sourceSet`, `runtimeEntry`, `declarationEntry`, `emittedArtifacts`, `publishable`, `sourceMapEmission`, `ambientTypes` |
-| Feature aggregates | `featureToolPackages`, `featureRuntimePackages`, `featureAmbientTypes`, `featureGeneratedFiles`, `featureAllowBuilds`, `featureTargets`, `featureValidations` |
+| Feature aggregates | `featureToolPackages`, `featureRuntimePackages`, `featureAmbientTypes`, `featureGeneratedFiles`, `featureAllowBuilds`, `featureValidations` |
 
 ### Package and TypeScript settings
 
@@ -132,21 +132,29 @@ Every product feature provides the same tool-neutral contract:
 | Product facts | `productKind`, `runtimeKind`, `languageTarget`, `sourceMapIntent`, `buildAssetInputs` |
 | Product calculations | `moduleKind`, `moduleResolutionKind`, `standardLibraries`, `baseAmbientTypes`, `sourceAlias`, `productToolPackages`, `productRuntimePackages`, `productAllowBuilds`, `buildAssets` |
 | Additional `viteReact()` keys | `vite.plugins`, `vite.resolve.alias`, `viteConfig`, `viteGeneratedFiles` |
+| `library()` targets | `libraryTypecheckConfigTarget`, `libraryTypecheckInstallTarget`, `libraryTypecheckTarget`, `libraryBuildConfigTarget`, `libraryBuildInstallTarget`, `libraryBuildTarget`, `libraryCiPackTarget`, `libraryPublishPackTarget` |
+| `cloudflareWorker()` targets | `cloudflareTypecheckConfigTarget`, `cloudflareTypecheckInstallTarget`, `cloudflareTypecheckTarget` |
+| `viteReact()` targets | `viteTypecheckConfigTarget`, `viteTypecheckInstallTarget`, `viteTypecheckTarget`, `viteBuildConfigTarget`, `viteBuildInstallTarget`, `viteBuildTarget`, `viteDevInstallTarget` |
 
 ### Capability keys
 
 | Capability | Keys |
 | --- | --- |
 | `prettier()` | `formatSemicolons`, `formatTabWidth`, `formatSingleQuotes`, `formatPrintWidth`, `formatTrailingCommas`, `prettierToolPackages`, `prettier.$schema`, `prettier.semi`, `prettier.tabWidth`, `prettier.singleQuote`, `prettier.printWidth`, `prettier.trailingComma`, `prettierConfig`, `prettierGeneratedFiles` |
-| `biome()` | `biomeFormatterIntent`, `biomeLinterIntent`, `biomeIntents`, `biomeToolPackages`, `biome.formatter.enabled`, `biome.linter.enabled`, `biomeConfig`, `biomeGeneratedFiles`, `biomeLintTarget` |
-| `vitest()` | `testEnvironment`, `testGlobalsIntent`, `testTypecheckIntent`, `vitestToolPackages`, `vitestAmbientTypes`, `vitest.test.environment`, `vitest.test.globals`, `vitest.test.typecheck.enabled`, `vitest.test.exclude`, `vitest.test.root`, `vitestConfig`, `vitestGeneratedFiles`, `vitestAllowBuilds` |
-| `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles` |
-| `typedoc()` | `documentationTitle`, `typedocToolPackages`, `typedoc.entryPoints`, `typedoc.name`, `typedoc.includeVersion`, `typedoc.excludeExternals`, `typedoc.excludePrivate`, `typedoc.excludeProtected`, `typedoc.exclude`, `typedocConfig`, `typedocGeneratedFiles` |
+| `biome()` | `biomeFormatterIntent`, `biomeLinterIntent`, `biomeIntents`, `biomeToolPackages`, `biome.formatter.enabled`, `biome.linter.enabled`, `biomeConfig`, `biomeGeneratedFiles`, `biomeLintConfigTarget`, `biomeLintInstallTarget`, `biomeLintTarget` |
+| `vitest()` | `testEnvironment`, `testGlobalsIntent`, `testTypecheckIntent`, `vitestToolPackages`, `vitestAmbientTypes`, `vitest.test.environment`, `vitest.test.globals`, `vitest.test.typecheck.enabled`, `vitest.test.exclude`, `vitest.test.root`, `vitestConfig`, `vitestGeneratedFiles`, `vitestAllowBuilds`, `vitestTestConfigTarget`, `vitestTestInstallTarget`, `vitestTestTarget` |
+| `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles`, `eslintLintConfigTarget`, `eslintLintInstallTarget`, `eslintLintTarget` |
+| `typedoc()` | `documentationTitle`, `typedocToolPackages`, `typedoc.entryPoints`, `typedoc.name`, `typedoc.includeVersion`, `typedoc.excludeExternals`, `typedoc.excludePrivate`, `typedoc.excludeProtected`, `typedoc.exclude`, `typedocConfig`, `typedocGeneratedFiles`, `typedocDocsConfigTarget`, `typedocDocsInstallTarget`, `typedocDocsTarget` |
 
 ## Authoring features
 
 `defineFeature()` is the public authoring boundary. Inputs become external DAG nodes; settings are
 ordinary calculations with explicit dependencies and optional contribution tags:
+
+- A setting definition is `{ deps, factory, tags }`.
+- A target value is `{ name, deps, run }`.
+- A facet is `{ name, targets }`, where `targets` is that facet's collection tag.
+- A feature is `{ name, externalValues, module }` and `.with(feature)` merges its module into the DI DAG.
 
 ```js
 import { defineFeature, requires, setting, target } from '//stacks/ts//dagr.stack.js'
@@ -167,26 +175,44 @@ The requirement is a DAG dependency, not a dependency on the `eslint()` feature 
 validated by the final workspace, so using `companyEslintRules()` without `eslint()` fails with the
 missing `eslint.enabled` setting.
 
-Targets are ordinary tagged setting values:
+Targets are ordinary tagged setting values and retain Dagr's native shape:
 
 ```js
-biomeLintTarget: setting(
-  ['biomeLinterIntent'],
-  enabled => enabled
-    ? target('ci:lint', {
-        command: 'pnpm exec biome check .',
-      })
-    : undefined,
-  { tags: ['targets', 'buildDependencies'] },
-)
+import { ciFacet, defineFeature, setting, target } from '//stacks/ts//dagr.stack.js'
+
+export const health = () => defineFeature('health', {
+  settings: {
+    healthTarget: setting(
+      [],
+      () => target('health', {
+        deps: [],
+        run: () => ({
+          FROM: 'alpine:3.22',
+          steps: [{ RUN: 'echo healthy' }],
+          IGNORE: [],
+        }),
+      }),
+      { tags: [ciFacet.targets] },
+    ),
+  },
+})
 ```
 
-The target name declares its facet and default intent. The stack turns that contribution into a
-concrete `target:ci:lint` binding. That binding is tagged for the `ci` facet; `facet:ci` collects all
-such targets and is itself tagged for `index`:
+That value is exactly:
+
+```js
+{
+  name: 'health',
+  deps: [],
+  run: Function,
+}
+```
+
+There is no target specification or target-kind interpreter. The `ci` facet collects every value
+tagged with `ciFacet.targets`; the root facet tag then collects `ci`:
 
 ```text
-target:ci:lint --tag--> facet:ci --tag--> index
+healthTarget --tag(ci.targets)--> facet:ci --tag(facets)--> index
 ```
 
 The selected target never enters this DI. Dagr selects a target only after DI has returned the
@@ -226,10 +252,10 @@ contributions use DI tags instead of a parallel contribution registry:
 | `ambientTypes` | `featureAmbientTypes` |
 | `generatedFiles` | `featureGeneratedFiles` |
 | `allowBuilds` | `featureAllowBuilds` |
-| `targets` | `featureTargets` |
 | `validations` | `featureValidations` |
 | `buildDependencies` | A product build target's runtime dependency collector |
 | `eslint.ruleSets` | `eslintRules` |
+| `<facet>.targets` | The corresponding facet, such as `ciFacet.targets` → `facet:ci` |
 
 Each contributing node carries its tags in the calculation graph. Each collector has a `{ tag }`
 dependency and receives a record keyed by the contributing node names. Adding a capability therefore

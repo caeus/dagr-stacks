@@ -8,26 +8,23 @@ makes a particular package different.
 
 ## Configuration model
 
-Stacks accept project facts and developer intent. The selected target supplies the action, and the
-stack combines those with irreducible external policy to derive tool configuration for that action.
-Generated files are projections, not canonical project truth.
+Stacks accept project facts and developer intent, then calculate generated configuration and the
+complete Dagr target index. Generated files are outputs, not canonical project truth.
 
-The calculation itself is an explicit DAG. Each node declares whether its value comes from external
-configuration, from the selected target, or from a calculation over named dependency nodes. The
-`ts-library` stack executes that DAG with the shared [`di`](di/) component rather than carrying a
-second graph evaluator.
+The calculation itself is an explicit DAG. Each node comes from external configuration, target
+intent, or a calculation over named dependency nodes. Targets collect into facets through DI tags;
+facets collect into the root index. Target selection happens later, in Dagr, and never enters the
+stack DI.
 
 This means a stack owns consistency between tools. For example, a compiler output directory and a
 package manifest's entry points and file list are one derived agreement, not unrelated consumer
-options. Likewise, publishability comes from selecting a publishing target; it is not a second
-boolean that can contradict the action. A publishing location owns registry visibility and other
+options. Likewise, a publishing target derives a publishable manifest; publishability is not a
+second boolean that can contradict it. A publishing location owns registry visibility and other
 location-specific policy.
 
-See [`ts-library`](ts-library/) for the concrete fact, intent, action, external policy, and derived
-configuration mapping.
-
-[`typescript`](typescript/) is the composable successor. Its library, Cloudflare worker, Vite
-React, test, lint, format, and documentation modules merge into one explicit calculation DAG.
+[`typescript`](typescript/) is the composable stack. Its library, Cloudflare worker, Vite React,
+test, lint, format, and documentation modules merge into one explicit calculation DAG. `ts-library`
+is retained as the earlier, target-parameterized implementation.
 
 ## Convention
 

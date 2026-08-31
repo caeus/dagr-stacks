@@ -62,10 +62,15 @@ describe('mountable TypeScript stack', () => {
       'typescript': '6',
       'vitest': '3',
     }
+    let calculations
     const project = stack.default({
       base: 'base',
       versions,
       conventions: { sourceDirectory: 'source' },
+      transform(index, context) {
+        calculations = context.calculations
+        return index
+      },
     })
       .with(stack.library())
       .with(stack.vitest())
@@ -82,6 +87,12 @@ describe('mountable TypeScript stack', () => {
       'pack',
     ])
     assert.deepEqual(Object.keys(index.publish), ['pack'])
+    assert.equal(calculations.nodes['dev:sync/intent'].kind, 'calculated')
+    assert.equal(calculations.nodes['dev:sync/intent'].deps.length, 0)
+    assert.equal(calculations.nodes.index.deps[0].tag.description, 'typescript facets')
+    const ciTargets = calculations.nodes['facet:ci'].deps[0].tag
+    assert.equal(ciTargets.description, 'typescript ci targets')
+    assert.ok(calculations.nodes['target:ci:test'].tags.includes(ciTargets))
     const sourceCopy = index.ci.typecheck.run({ images: { 'install-typecheck': 'image' } }).steps[0]
     assert.equal(sourceCopy.COPY.src, 'source')
     assert.equal(sourceCopy.COPY.dest, '/repo/source')

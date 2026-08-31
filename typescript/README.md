@@ -1,7 +1,7 @@
 # Composable TypeScript stack
 
-This component turns project intent and a selected dagr target into generated tool configuration
-and executable targets. Consumers mount only this directory.
+This component calculates generated tool configuration, executable targets, facets, and finally a
+complete Dagr index. Consumers mount only this directory.
 
 ```js
 import typescript, {
@@ -30,23 +30,26 @@ export default stack({
 })
 ```
 
-`typescript()` owns the common projection and target machinery. Each `.with(...)` argument adds a
-small calculation module. The modules are merged into one DAG before DI shakes and compiles the
-requested roots.
+`typescript()` owns the common settings and target machinery. Each `.with(...)` argument adds a
+small calculation module. The modules are merged into one DAG and the stack resolves one root:
+
+```js
+module.shake(['index']).compile().index
+```
 
 The topology is graph-first, not manifest-first:
 
 ```text
-conventions + external facts + selected target
-                    |
-                    v
-              semantic nodes
-                    |
-                    v
-         tool-specific field nodes
-                    |
-                    v
-          assembled files and targets
+conventions + external facts
+            |
+            v
+     semantic settings
+            |
+            v
+  field-level tool settings
+            |
+            v
+ concrete target definitions --tag--> facets --tag--> index
 ```
 
 Conventions are zero-dependency calculations, not hidden constants in a manifest generator. The
@@ -75,7 +78,7 @@ tool fields:
 | `sourceAlias` | `packageJson.imports`, `tsconfig.compilerOptions.paths`, `vite.resolve.alias` |
 
 Neither tool is canonical. For example, `packageJson.main` is not calculated from
-`tsconfig.compilerOptions.outDir`; both are projections of `outputLayout` and the relevant entry
+`tsconfig.compilerOptions.outDir`; both are derived from `outputLayout` and the relevant entry
 semantics. `packageJson` and `tsconfig` only assemble their field nodes plus passive metadata.
 
 The transform context exposes `calculations` as the graph structure. A dedicated inspection API is
@@ -83,10 +86,10 @@ intentionally left for later.
 
 ## DI keys
 
-Keys are plain JavaScript strings. The exact graph depends on the selected product feature and
-capabilities. Only the convention keys are accepted by `typescript({ conventions })`; the remaining
-keys describe the internal calculation graph and are available to transforms through
-`calculations.nodes`.
+Keys are plain JavaScript strings. Configuration-specific keys are prefixed by the target whose
+workspace they calculate, such as `ci:test/packageJson.private`. Targets are outputs, so there is no
+selected-target input. Only convention keys are accepted by `typescript({ conventions })`; all keys
+are available to transforms through `calculations.nodes`.
 
 ```js
 typescript({
@@ -103,13 +106,13 @@ typescript({
 
 | Source | Keys |
 | --- | --- |
-| Conventions | `targetActions`, `developmentActions`, `distributionActions`, `emitActions`, `testSourceActions`, `vitestActions`, `vitestDependencyActions`, `vitestTypeActions`, `eslintActions`, `typedocActions`, `viteActions`, `devAction`, `publishAction`, `dependencyLocations`, `metadataFields`, `sourceDirectory`, `entryFile`, `outputDirectory`, `javascriptModuleFormat` |
+| Conventions | `developmentIntents`, `distributionIntents`, `emissionIntents`, `testSourceIntents`, `vitestIntents`, `vitestDependencyIntents`, `vitestTypeIntents`, `eslintIntents`, `typedocIntents`, `viteIntents`, `developmentIntentName`, `publicationIntentName`, `dependencyLocations`, `metadataFields`, `sourceDirectory`, `entryFile`, `outputDirectory`, `javascriptModuleFormat` |
 | External package facts | `location`, `scope`, `version`, `deps`, `metadata`, `versions` |
-| Selected context | `target` |
-| Semantic calculations | `action`, `name`, `slug`, `validatedMetadata`, `sourceLayout`, `sourceEntry`, `outputLayout`, `distributionIntent`, `emissionIntent`, `testSourcesIncluded`, `sourceSet`, `runtimeEntry`, `declarationEntry`, `emittedArtifacts`, `publishable`, `sourceMapEmission`, `ambientTypes` |
+| Target-derived setting | `intent` |
+| Semantic calculations | `name`, `slug`, `validatedMetadata`, `sourceLayout`, `sourceEntry`, `outputLayout`, `distributionIntent`, `emissionIntent`, `testSourcesIncluded`, `sourceSet`, `runtimeEntry`, `declarationEntry`, `emittedArtifacts`, `publishable`, `sourceMapEmission`, `ambientTypes` |
 | Feature aggregates | `featureToolPackages`, `featureRuntimePackages`, `featureAmbientTypes`, `featureGeneratedFiles`, `featureAllowBuilds`, `featureTargets`, `featureValidations` |
 
-### Package and TypeScript projections
+### Package and TypeScript settings
 
 | Group | Keys |
 | --- | --- |
@@ -118,7 +121,7 @@ typescript({
 | Package assembly | `packageJson` |
 | TypeScript fields | `tsconfig.extends`, `tsconfig.include`, `tsconfig.exclude`, `tsconfig.compilerOptions.rootDir`, `tsconfig.compilerOptions.outDir`, `tsconfig.compilerOptions.target`, `tsconfig.compilerOptions.lib`, `tsconfig.compilerOptions.module`, `tsconfig.compilerOptions.moduleResolution`, `tsconfig.compilerOptions.noEmit`, `tsconfig.compilerOptions.declaration`, `tsconfig.compilerOptions.sourceMap`, `tsconfig.compilerOptions.inlineSources`, `tsconfig.compilerOptions.types`, `tsconfig.compilerOptions.paths`, `tsconfig.compilerOptions.allowImportingTsExtensions`, `tsconfig.compilerOptions.moduleDetection`, `tsconfig.compilerOptions.jsx` |
 | TypeScript assembly | `compilerOptions`, `tsconfig` |
-| Final projection | `files`, `allowBuilds`, `output`, `projection` |
+| Workspace assembly | `files`, `allowBuilds`, `output`, `workspace` |
 
 ### Product keys
 
@@ -135,7 +138,7 @@ Every product feature provides the same tool-neutral contract:
 | Capability | Keys |
 | --- | --- |
 | `prettier()` | `formatSemicolons`, `formatTabWidth`, `formatSingleQuotes`, `formatPrintWidth`, `formatTrailingCommas`, `prettierToolPackages`, `prettier.$schema`, `prettier.semi`, `prettier.tabWidth`, `prettier.singleQuote`, `prettier.printWidth`, `prettier.trailingComma`, `prettierConfig`, `prettierGeneratedFiles` |
-| `biome()` | `biomeFormatterIntent`, `biomeLinterIntent`, `biomeActions`, `biomeToolPackages`, `biome.formatter.enabled`, `biome.linter.enabled`, `biomeConfig`, `biomeGeneratedFiles`, `biomeLintTarget` |
+| `biome()` | `biomeFormatterIntent`, `biomeLinterIntent`, `biomeIntents`, `biomeToolPackages`, `biome.formatter.enabled`, `biome.linter.enabled`, `biomeConfig`, `biomeGeneratedFiles`, `biomeLintTarget` |
 | `vitest()` | `testEnvironment`, `testGlobalsIntent`, `testTypecheckIntent`, `vitestToolPackages`, `vitestAmbientTypes`, `vitest.test.environment`, `vitest.test.globals`, `vitest.test.typecheck.enabled`, `vitest.test.exclude`, `vitest.test.root`, `vitestConfig`, `vitestGeneratedFiles`, `vitestAllowBuilds` |
 | `eslint()` | `lintFormattingIntent`, `lintExplicitReturnTypesIntent`, `eslintToolPackages`, `eslint.languageOptions.parser`, `eslint.languageOptions.parserOptions.project`, `eslint.files`, `eslint.testFiles`, `eslint.rules.no-undef`, `eslint.rules.no-redeclare`, `eslint.rules.@typescript-eslint/no-empty-object-type`, `eslint.rules.@typescript-eslint/no-unused-vars`, `eslint.rules.@typescript-eslint/explicit-function-return-type`, `eslint.rules.prettier/prettier`, `eslintRules`, `eslintConfig`, `eslintGeneratedFiles` |
 | `typedoc()` | `documentationTitle`, `typedocToolPackages`, `typedoc.entryPoints`, `typedoc.name`, `typedoc.includeVersion`, `typedoc.excludeExternals`, `typedoc.excludePrivate`, `typedoc.excludeProtected`, `typedoc.exclude`, `typedocConfig`, `typedocGeneratedFiles` |
@@ -161,7 +164,7 @@ export const companyEslintRules = rules => defineFeature('company-eslint-rules',
 ```
 
 The requirement is a DAG dependency, not a dependency on the `eslint()` feature object. It is always
-validated by the final projection, so using `companyEslintRules()` without `eslint()` fails with the
+validated by the final workspace, so using `companyEslintRules()` without `eslint()` fails with the
 missing `eslint.enabled` setting.
 
 Targets are ordinary tagged setting values:
@@ -177,6 +180,17 @@ biomeLintTarget: setting(
   { tags: ['targets', 'buildDependencies'] },
 )
 ```
+
+The target name declares its facet and default intent. The stack turns that contribution into a
+concrete `target:ci:lint` binding. That binding is tagged for the `ci` facet; `facet:ci` collects all
+such targets and is itself tagged for `index`:
+
+```text
+target:ci:lint --tag--> facet:ci --tag--> index
+```
+
+The selected target never enters this DI. Dagr selects a target only after DI has returned the
+complete index.
 
 There is no feature role or execution registry. Product selection, extension requirements, generated
 files, and executable targets are all represented by calculation nodes and edges.
@@ -196,7 +210,7 @@ other values that only exist to make tools agree.
 
 ## Capabilities
 
-- `prettier()` adds formatting policy and the development projection.
+- `prettier()` adds formatting policy and development workspace settings.
 - `biome()` adds Biome formatting/linting policy, generated configuration, and `ci:lint`.
 - `vitest()` adds test-runtime intent, generated configuration, and `ci:test`.
 - `eslint()` adds lint policy, generated configuration, and `ci:lint`.
@@ -214,7 +228,7 @@ contributions use DI tags instead of a parallel contribution registry:
 | `allowBuilds` | `featureAllowBuilds` |
 | `targets` | `featureTargets` |
 | `validations` | `featureValidations` |
-| `buildDependencies` | The selected product's build-target setting |
+| `buildDependencies` | A product build target's runtime dependency collector |
 | `eslint.ruleSets` | `eslintRules` |
 
 Each contributing node carries its tags in the calculation graph. Each collector has a `{ tag }`
@@ -224,6 +238,10 @@ file collisions still fail instead of silently choosing whichever tool happened 
 
 Tags are only for open-ended collections. Behavioral configuration fields and tool-neutral semantic
 nodes remain ordinary named dependencies, so their exact values and invariants stay inspectable.
+
+Target and facet assembly uses the same mechanism with private tags. Concrete targets collect into
+their facet, and facets collect into the root `index` binding. Duplicate public target names fail
+during assembly.
 
 The package declaration accepts only facts that cannot be derived: logical location, version,
 dependencies, and passive metadata. `private`, output paths, exports, generated files, scripts, and

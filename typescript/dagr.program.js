@@ -6,7 +6,7 @@ const node = (kind, deps = [], factory, tags = []) => Object.freeze({
 })
 
 const external = () => node('external')
-const target = () => node('target')
+const contextual = () => node('contextual')
 const calculated = (deps, factory, tags = []) => node('calculated', deps, factory, tags)
 
 const calculationModule = (name, nodes) => Object.freeze({
@@ -32,12 +32,12 @@ function mergeCalculationModules(modules) {
   })
 }
 
-function compileCalculationGraph(graph, di, externalValues, targetValues, roots) {
+function compileCalculationGraph(graph, di, externalValues, contextualValues, roots) {
   const sourceModule = kind => di.module(Object.fromEntries(
     Object.entries(graph.nodes)
       .filter(([, definition]) => definition.kind === kind)
       .map(([name]) => {
-        const values = kind === 'external' ? externalValues : targetValues
+        const values = kind === 'external' ? externalValues : contextualValues
         if (!Object.hasOwn(values, name)) {
           throw new Error(`Missing ${kind} calculation node ${JSON.stringify(name)}`)
         }
@@ -53,47 +53,26 @@ function compileCalculationGraph(graph, di, externalValues, targetValues, roots)
       ]),
   ))
   return sourceModule('external')
-    .merge(sourceModule('target'))
+    .merge(sourceModule('contextual'))
     .merge(calculations)
     .shake(roots)
     .compile()
 }
 
 const DEFAULT_CONVENTIONS = Object.freeze({
-  targetActions: Object.freeze({
-    'config:dev': 'dev',
-    'config:typecheck': 'typecheck',
-    'config:test': 'test',
-    'config:lint': 'lint',
-    'config:docs': 'docs',
-    'config:build': 'build',
-    'dev:sync': 'dev',
-    'ci:install-typecheck': 'typecheck',
-    'ci:install-test': 'test',
-    'ci:install-lint': 'lint',
-    'ci:install-docs': 'docs',
-    'ci:install-build': 'build',
-    'ci:typecheck': 'typecheck',
-    'ci:test': 'test',
-    'ci:lint': 'lint',
-    'ci:docs': 'docs',
-    'ci:build': 'build',
-    'ci:pack': 'pack',
-    'publish:pack': 'publish',
-  }),
-  developmentActions: Object.freeze(['dev', 'typecheck', 'test', 'lint', 'docs', 'build']),
-  distributionActions: Object.freeze(['pack', 'publish']),
-  emitActions: Object.freeze(['build', 'pack', 'publish']),
-  testSourceActions: Object.freeze(['dev', 'test', 'lint']),
-  vitestActions: Object.freeze(['dev', 'test']),
-  vitestDependencyActions: Object.freeze(['dev', 'test', 'lint']),
-  vitestTypeActions: Object.freeze(['dev', 'test', 'lint']),
-  prettierActions: Object.freeze(['dev', 'lint']),
-  eslintActions: Object.freeze(['dev', 'lint']),
-  typedocActions: Object.freeze(['dev', 'docs']),
-  viteActions: Object.freeze(['dev', 'test', 'build']),
-  devAction: 'dev',
-  publishAction: 'publish',
+  developmentIntents: Object.freeze(['dev', 'typecheck', 'test', 'lint', 'docs', 'build']),
+  distributionIntents: Object.freeze(['pack', 'publish']),
+  emissionIntents: Object.freeze(['build', 'pack', 'publish']),
+  testSourceIntents: Object.freeze(['dev', 'test', 'lint']),
+  vitestIntents: Object.freeze(['dev', 'test']),
+  vitestDependencyIntents: Object.freeze(['dev', 'test', 'lint']),
+  vitestTypeIntents: Object.freeze(['dev', 'test', 'lint']),
+  prettierIntents: Object.freeze(['dev', 'lint']),
+  eslintIntents: Object.freeze(['dev', 'lint']),
+  typedocIntents: Object.freeze(['dev', 'docs']),
+  viteIntents: Object.freeze(['dev', 'test', 'build']),
+  developmentIntentName: 'dev',
+  publicationIntentName: 'publish',
   dependencyLocations: Object.freeze(['prod', 'dev']),
   metadataFields: Object.freeze([
     'author', 'bugs', 'contributors', 'description', 'funding', 'homepage', 'keywords', 'license', 'repository',
@@ -235,13 +214,7 @@ const coreModule = calculationModule('typescript-semantics', {
   deps: external(),
   metadata: external(),
   versions: external(),
-  target: target(),
-
-  action: calculated(['target', 'targetActions'], (selectedTarget, targetActions) => {
-    const action = targetActions[selectedTarget]
-    if (action === undefined) throw new Error(`Unknown TypeScript target ${JSON.stringify(selectedTarget)}`)
-    return action
-  }),
+  intent: contextual(),
   name: calculated(['location', 'scope'], projectName),
   slug: calculated(['name'], name => name.slice(name.indexOf('/') + 1)),
   validatedMetadata: calculated(['name', 'metadata', 'metadataFields'], validateMetadata),
@@ -264,16 +237,16 @@ const coreModule = calculationModule('typescript-semantics', {
     },
   ),
   distributionIntent: calculated(
-    ['action', 'distributionActions'],
-    (action, actions) => actions.includes(action),
+    ['intent', 'distributionIntents'],
+    (intent, intents) => intents.includes(intent),
   ),
   emissionIntent: calculated(
-    ['productKind', 'action', 'emitActions'],
-    (product, action, actions) => product === 'library' && actions.includes(action),
+    ['productKind', 'intent', 'emissionIntents'],
+    (product, intent, intents) => product === 'library' && intents.includes(intent),
   ),
   testSourcesIncluded: calculated(
-    ['productKind', 'action', 'testSourceActions'],
-    (product, action, actions) => product !== 'library' || actions.includes(action),
+    ['productKind', 'intent', 'testSourceIntents'],
+    (product, intent, intents) => product !== 'library' || intents.includes(intent),
   ),
   sourceSet: calculated(
     ['productKind', 'sourceLayout', 'testSourcesIncluded'],
@@ -305,8 +278,8 @@ const coreModule = calculationModule('typescript-semantics', {
     },
   ),
   publishable: calculated(
-    ['action', 'publishAction'],
-    (action, publishAction) => action === publishAction,
+    ['intent', 'publicationIntentName'],
+    (intent, publication) => intent === publication,
   ),
   sourceMapEmission: calculated(
     ['sourceMapIntent', 'emissionIntent'],
@@ -353,8 +326,8 @@ const packageModule = calculationModule('package-json-fields', {
     entries => Object.fromEntries(entries.prod),
   ),
   'packageJson.devDependencies': calculated(
-    ['action', 'developmentActions', 'dependencyEntries', 'toolDependencyEntries'],
-    (action, actions, dependencies, tools) => actions.includes(action)
+    ['intent', 'developmentIntents', 'dependencyEntries', 'toolDependencyEntries'],
+    (intent, intents, dependencies, tools) => intents.includes(intent)
       ? Object.fromEntries([...tools, ...dependencies.dev])
       : undefined,
   ),
@@ -466,24 +439,23 @@ const tsconfigModule = calculationModule('tsconfig-fields', {
   ),
 })
 
-const projectionModule = calculationModule('tool-projections', {
+const workspaceModule = calculationModule('tool-workspaces', {
   files: calculated(
     ['packageJson', 'tsconfig', 'featureGeneratedFiles'],
     (packageJson, tsconfig, generated) => ({ 'package.json': packageJson, 'tsconfig.json': tsconfig, ...generated }),
   ),
   allowBuilds: calculated(['featureAllowBuilds'], value => value),
   output: calculated(['outputLayout'], value => value),
-  projection: calculated(
+  workspace: calculated(
     [
-      'target', 'action', 'name', 'slug', 'packageJson', 'tsconfig', 'files', 'output',
+      'intent', 'name', 'slug', 'packageJson', 'tsconfig', 'files', 'output',
       'allowBuilds', 'buildAssets', 'sourceLayout', 'sourceSet', 'runtimeEntry',
-      'declarationEntry', 'emittedArtifacts', 'featureTargets', 'featureValidations',
+      'declarationEntry', 'emittedArtifacts', 'featureValidations',
     ],
-    (selectedTarget, action, name, slug, packageJson, tsconfig, files, output,
+    (intent, name, slug, packageJson, tsconfig, files, output,
       allowBuilds, buildAssets, sourceLayout, sourceSet, runtimeEntry, declarationEntry,
-      emittedArtifacts, targets, _validations) => ({
-      target: selectedTarget,
-      action,
+      emittedArtifacts, _validations) => ({
+      intent,
       name,
       slug,
       packageJson,
@@ -492,7 +464,6 @@ const projectionModule = calculationModule('tool-projections', {
       output,
       allowBuilds,
       buildAssets,
-      targets,
       semantics: { sourceLayout, sourceSet, outputLayout: output, runtimeEntry, declarationEntry, emittedArtifacts },
     }),
   ),
@@ -512,11 +483,52 @@ export function typescriptCalculationGraph(features, conventions = {}) {
     aggregateModule(),
     packageModule,
     tsconfigModule,
-    projectionModule,
+    workspaceModule,
   ])
 }
 
-export function typescriptProjector(di, {
+const scopedKey = (scope, key) => `${scope}/${key}`
+
+const scopedDependency = (scope, dependency) => typeof dependency === 'object'
+  ? { tag: scopedKey(scope, dependency.tag) }
+  : scopedKey(scope, dependency)
+
+function scopedCalculationModule(di, graph, externalValues, { name: scope, intent }) {
+  return di.module(Object.fromEntries(Object.entries(graph.nodes).map(([name, definition]) => {
+    const key = scopedKey(scope, name)
+    if (definition.kind === 'external') return [key, di.toValue(externalValues[name])]
+    if (definition.kind === 'contextual') return [key, di.toValue(intent)]
+    return [key, di.toFun(
+      definition.deps.map(dependency => scopedDependency(scope, dependency)),
+      definition.factory,
+      definition.tags.map(tag => scopedKey(scope, tag)),
+    )]
+  })))
+}
+
+function scopedCalculationGraph(graph, contexts) {
+  const nodes = {}
+  const owners = {}
+  for (const context of contexts) {
+    for (const [name, definition] of Object.entries(graph.nodes)) {
+      const key = scopedKey(context.name, name)
+      nodes[key] = definition.kind === 'contextual'
+        ? calculated([], () => context.intent)
+        : node(
+            definition.kind,
+            definition.deps.map(dependency => scopedDependency(context.name, dependency)),
+            definition.factory,
+            definition.tags.map(tag => scopedKey(context.name, tag)),
+          )
+      owners[key] = graph.owners[name]
+    }
+  }
+  return Object.freeze({ nodes: Object.freeze(nodes), owners: Object.freeze(owners) })
+}
+
+const targetName = target => `${target.facet}:${target.name}`
+
+export function typescriptProgram(di, {
   location,
   scope,
   version,
@@ -526,7 +538,7 @@ export function typescriptProjector(di, {
   features,
   conventions = {},
 }) {
-  const graph = typescriptCalculationGraph(features, conventions)
+  const template = typescriptCalculationGraph(features, conventions)
   const externalValues = {
     location,
     scope,
@@ -536,15 +548,43 @@ export function typescriptProjector(di, {
     versions,
     ...Object.assign({}, ...features.map(feature => feature.externalValues)),
   }
-  const calculate = (selectedTarget, roots) => compileCalculationGraph(
-    graph,
+
+  const discovered = compileCalculationGraph(
+    template,
     di,
     externalValues,
-    { target: selectedTarget },
-    roots,
+    { intent: 'dev' },
+    ['featureTargets'],
   )
+  const targets = Object.freeze(Object.values(discovered.featureTargets))
+  const contextsByName = new Map([
+    ['dev:sync', { name: 'dev:sync', intent: 'dev' }],
+    ['config:dev', { name: 'config:dev', intent: 'dev' }],
+  ])
+  const addContext = context => {
+    const existing = contextsByName.get(context.name)
+    if (existing && existing.intent !== context.intent) {
+      throw new Error(`Configuration ${JSON.stringify(context.name)} has conflicting intents`)
+    }
+    contextsByName.set(context.name, context)
+  }
+  for (const target of targets) {
+    addContext({ name: targetName(target), intent: target.intent })
+    if (target.kind === 'command') {
+      addContext({ name: `config:${target.name}`, intent: target.intent })
+    }
+  }
+  const contexts = Object.freeze([...contextsByName.values()].map(Object.freeze))
+  let module = di.module({})
+  for (const context of contexts) {
+    module = module.merge(scopedCalculationModule(di, template, externalValues, context))
+  }
+
   return Object.freeze({
-    graph,
-    project: selectedTarget => calculate(selectedTarget, ['projection']).projection,
+    graph: scopedCalculationGraph(template, contexts),
+    module,
+    contexts,
+    targets,
+    key: scopedKey,
   })
 }

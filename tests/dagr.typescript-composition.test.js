@@ -15,7 +15,7 @@ import {
   viteReact,
   vitest,
 } from '../typescript/dagr.features.js'
-import { typescriptProjector } from '../typescript/dagr.projections.js'
+import { typescriptProgram } from '../typescript/dagr.program.js'
 
 const versions = {
   '@biomejs/biome': '2',
@@ -47,7 +47,16 @@ const versions = {
   'wrangler': '4',
 }
 
-const projector = features => typescriptProjector(di, {
+const withWorkspaces = program => {
+  const roots = program.contexts.map(context => program.key(context.name, 'workspace'))
+  const container = program.module.shake(roots).compile()
+  return Object.freeze({
+    ...program,
+    workspace: name => container[program.key(name, 'workspace')],
+  })
+}
+
+const programFor = features => withWorkspaces(typescriptProgram(di, {
   location: '//packages/example',
   scope: 'internal',
   version: '1.2.3',
@@ -55,9 +64,9 @@ const projector = features => typescriptProjector(di, {
   metadata: { description: 'Example' },
   versions,
   features,
-})
+}))
 
-describe('composable TypeScript projections', () => {
+describe('composable TypeScript workspaces', () => {
   it('merges small calculation modules into one explicit DAG', () => {
     const features = [
       library({ runtime: 'node' }),
@@ -66,44 +75,42 @@ describe('composable TypeScript projections', () => {
       eslint({ prettier: true }),
       typedoc(),
     ]
-    const { graph, project } = projector(features)
+    const { graph, workspace } = programFor(features)
 
     assert.equal(features[0].role, undefined)
     assert.equal(features[0].execution, undefined)
-    assert.equal(graph.owners.moduleKind, 'library')
-    assert.equal(graph.owners.outputDirectory, 'typescript-conventions')
-    assert.equal(graph.nodes.outputDirectory.kind, 'calculated')
-    assert.deepEqual(graph.nodes.outputDirectory.deps, [])
-    assert.equal(graph.owners['vitest.test.environment'], 'vitest')
-    assert.equal(graph.owners['packageJson.main'], 'package-json-fields')
-    assert.equal(graph.owners['tsconfig.compilerOptions.outDir'], 'tsconfig-fields')
-    assert.deepEqual(graph.nodes['packageJson.main'].deps, ['runtimeEntry'])
-    assert.deepEqual(graph.nodes['packageJson.files'].deps, [
-      'productKind',
-      'distributionIntent',
-      'emittedArtifacts',
+    const dev = name => `dev:sync/${name}`
+    assert.equal(graph.owners[dev('moduleKind')], 'library')
+    assert.equal(graph.owners[dev('outputDirectory')], 'typescript-conventions')
+    assert.equal(graph.nodes[dev('outputDirectory')].kind, 'calculated')
+    assert.deepEqual(graph.nodes[dev('outputDirectory')].deps, [])
+    assert.equal(graph.owners[dev('vitest.test.environment')], 'vitest')
+    assert.equal(graph.owners[dev('packageJson.main')], 'package-json-fields')
+    assert.equal(graph.owners[dev('tsconfig.compilerOptions.outDir')], 'tsconfig-fields')
+    assert.deepEqual(graph.nodes[dev('packageJson.main')].deps, [dev('runtimeEntry')])
+    assert.deepEqual(graph.nodes[dev('packageJson.files')].deps, [
+      dev('productKind'),
+      dev('distributionIntent'),
+      dev('emittedArtifacts'),
     ])
-    assert.deepEqual(graph.nodes['tsconfig.compilerOptions.outDir'].deps, [
-      'emissionIntent',
-      'outputLayout',
+    assert.deepEqual(graph.nodes[dev('tsconfig.compilerOptions.outDir')].deps, [
+      dev('emissionIntent'),
+      dev('outputLayout'),
     ])
-    assert.deepEqual(graph.nodes.prettierToolPackages.tags, ['toolPackages'])
-    assert.deepEqual(graph.nodes.prettierGeneratedFiles.tags, ['generatedFiles'])
-    assert.deepEqual(graph.nodes.vitestAmbientTypes.tags, ['ambientTypes'])
-    assert.deepEqual(graph.nodes.vitestAllowBuilds.tags, ['allowBuilds'])
-    assert.deepEqual(graph.nodes.featureToolPackages.deps, [{ tag: 'toolPackages' }])
-    assert.deepEqual(graph.nodes.featureGeneratedFiles.deps, [{ tag: 'generatedFiles' }])
-    assert.deepEqual(graph.nodes.featureAmbientTypes.deps, [{ tag: 'ambientTypes' }])
-    assert.deepEqual(graph.nodes.featureAllowBuilds.deps, [{ tag: 'allowBuilds' }])
-    assert.deepEqual(graph.nodes.featureTargets.deps, [{ tag: 'targets' }])
-    assert.deepEqual(graph.nodes.featureValidations.deps, [{ tag: 'validations' }])
-    assert.deepEqual(graph.nodes.libraryBuildTarget.deps, [{ tag: 'buildDependencies' }])
-    assert.deepEqual(graph.nodes.vitestTestTarget.tags, ['targets', 'buildDependencies'])
-    assert.equal(graph.nodes.libraryTsconfig, undefined)
-    assert.equal(graph.nodes.featurePackageFields, undefined)
+    assert.deepEqual(graph.nodes[dev('prettierToolPackages')].tags, [dev('toolPackages')])
+    assert.deepEqual(graph.nodes[dev('prettierGeneratedFiles')].tags, [dev('generatedFiles')])
+    assert.deepEqual(graph.nodes[dev('vitestAmbientTypes')].tags, [dev('ambientTypes')])
+    assert.deepEqual(graph.nodes[dev('vitestAllowBuilds')].tags, [dev('allowBuilds')])
+    assert.deepEqual(graph.nodes[dev('featureToolPackages')].deps, [{ tag: dev('toolPackages') }])
+    assert.deepEqual(graph.nodes[dev('featureTargets')].deps, [{ tag: dev('targets') }])
+    assert.deepEqual(graph.nodes[dev('featureValidations')].deps, [{ tag: dev('validations') }])
+    assert.deepEqual(graph.nodes[dev('libraryBuildTarget')].deps, [{ tag: dev('buildDependencies') }])
+    assert.deepEqual(graph.nodes[dev('vitestTestTarget')].tags, [dev('targets'), dev('buildDependencies')])
+    assert.equal(graph.nodes[dev('libraryTsconfig')], undefined)
+    assert.equal(graph.nodes[dev('featurePackageFields')], undefined)
     assert.equal(graph.contributions, undefined)
 
-    const pack = project('ci:pack')
+    const pack = workspace('ci:pack')
     assert.deepEqual(pack.semantics.outputLayout, {
       directory: 'dist',
       runtimeFile: 'dist/index.js',
@@ -116,7 +123,7 @@ describe('composable TypeScript projections', () => {
     assert.equal(pack.packageJson.types, './dist/index.d.ts')
     assert.deepEqual(pack.packageJson.files, ['dist'])
     assert.equal(pack.tsconfig.compilerOptions.outDir, 'dist')
-    assert.deepEqual(Object.keys(project('dev:sync').files), [
+    assert.deepEqual(Object.keys(workspace('dev:sync').files), [
       'package.json',
       'tsconfig.json',
       '.prettierrc.json',
@@ -127,7 +134,7 @@ describe('composable TypeScript projections', () => {
   })
 
   it('treats conventions as replaceable roots of the semantic graph', () => {
-    const { project } = typescriptProjector(di, {
+    const { workspace } = withWorkspaces(typescriptProgram(di, {
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
@@ -136,23 +143,23 @@ describe('composable TypeScript projections', () => {
       versions,
       features: [library()],
       conventions: { sourceDirectory: 'source', outputDirectory: 'build' },
-    })
+    }))
 
-    const pack = project('ci:pack')
+    const pack = workspace('ci:pack')
     assert.deepEqual(pack.semantics.outputLayout, {
       directory: 'build',
       runtimeFile: 'build/index.js',
       declarationFile: 'build/index.d.ts',
     })
     assert.deepEqual(pack.semantics.sourceLayout, { directory: 'source', entry: 'index.ts' })
-    assert.equal(project('ci:build').tsconfig.compilerOptions.outDir, 'build')
-    assert.equal(project('ci:build').tsconfig.compilerOptions.rootDir, 'source')
+    assert.equal(workspace('ci:build').tsconfig.compilerOptions.outDir, 'build')
+    assert.equal(workspace('ci:build').tsconfig.compilerOptions.rootDir, 'source')
     assert.deepEqual(pack.packageJson.files, ['build'])
     assert.equal(pack.packageJson.main, './build/index.js')
   })
 
   it('projects source conventions into every tool that consumes source paths', () => {
-    const { project } = typescriptProjector(di, {
+    const { workspace } = withWorkspaces(typescriptProgram(di, {
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
@@ -161,10 +168,10 @@ describe('composable TypeScript projections', () => {
       versions,
       features: [library(), eslint(), typedoc()],
       conventions: { sourceDirectory: 'source' },
-    })
+    }))
 
-    const lint = project('ci:lint')
-    const docs = project('ci:docs')
+    const lint = workspace('ci:lint')
+    const docs = workspace('ci:docs')
     assert.match(lint.files['eslint.config.mjs'], /source\/\*\*\/\*\.ts/)
     assert.deepEqual(docs.files['typedoc.json'].exclude, [
       'source/**/*.test.ts',
@@ -172,29 +179,29 @@ describe('composable TypeScript projections', () => {
     ])
   })
 
-  it('derives Wyr-style library projections from intent and target', () => {
-    const { project } = projector([
+  it('derives Wyr-style library workspaces from intent and target', () => {
+    const { workspace } = programFor([
       library({ runtime: 'node', language: 'ES2023', sourceMaps: true, assets: ['README.md', 'LICENSE'] }),
       prettier({ semi: true, trailingComma: 'all' }),
       vitest({ globals: true, typecheck: true }),
       eslint({ prettier: true }),
       typedoc({ title: 'Wyr' }),
     ])
-    const dev = project('dev:sync')
-    const build = project('ci:build')
-    const docs = project('ci:docs')
-    const pack = project('ci:pack')
-    const publish = project('publish:pack')
+    const dev = workspace('dev:sync')
+    const build = workspace('ci:build')
+    const docs = workspace('ci:docs')
+    const pack = workspace('ci:pack')
+    const publish = workspace('publish:pack')
 
     assert.equal(dev.tsconfig.compilerOptions.module, 'NodeNext')
     assert.equal(dev.tsconfig.compilerOptions.noEmit, true)
     assert.deepEqual(dev.tsconfig.compilerOptions.types, ['node', 'vitest/globals'])
-    assert.deepEqual(project('ci:typecheck').tsconfig.exclude, [
+    assert.deepEqual(workspace('ci:typecheck').tsconfig.exclude, [
       'src/**/*.test.ts',
       'src/**/*.spec.ts',
     ])
     assert.equal(dev.files['.prettierrc.json'].semi, true)
-    assert.deepEqual(project('ci:lint').files['.prettierrc.json'], {
+    assert.deepEqual(workspace('ci:lint').files['.prettierrc.json'], {
       $schema: 'https://json.schemastore.org/prettierrc',
       semi: true,
       tabWidth: 2,
@@ -202,7 +209,7 @@ describe('composable TypeScript projections', () => {
       printWidth: 100,
       trailingComma: 'all',
     })
-    assert.match(project('ci:lint').files['eslint.config.mjs'], /"no-dupe-class-members":"off"/)
+    assert.match(workspace('ci:lint').files['eslint.config.mjs'], /"no-dupe-class-members":"off"/)
     assert.match(dev.files['vitest.config.ts'], /typecheck: \{ enabled: true \}/)
     assert.deepEqual(build.buildAssets, ['README.md', 'LICENSE'])
     assert.deepEqual(docs.tsconfig.exclude, ['src/**/*.test.ts', 'src/**/*.spec.ts'])
@@ -214,8 +221,8 @@ describe('composable TypeScript projections', () => {
   })
 
   it('derives worker policy instead of accepting raw tsconfig', () => {
-    const { project } = projector([cloudflareWorker(), prettier()])
-    const dev = project('dev:sync')
+    const { workspace } = programFor([cloudflareWorker(), prettier()])
+    const dev = workspace('dev:sync')
 
     assert.equal(dev.packageJson.imports['#*'], './src/*')
     assert.equal(dev.tsconfig.compilerOptions.moduleResolution, 'NodeNext')
@@ -224,14 +231,14 @@ describe('composable TypeScript projections', () => {
   })
 
   it('derives the Vite React runtime, browser compiler, and test environment', () => {
-    const { project } = projector([
+    const { workspace } = programFor([
       viteReact(),
       prettier(),
       eslint(),
       vitest({ environment: 'jsdom' }),
     ])
-    const dev = project('dev:sync')
-    const build = project('ci:build')
+    const dev = workspace('dev:sync')
+    const build = workspace('ci:build')
 
     assert.equal(dev.packageJson.dependencies.react, '19')
     assert.deepEqual(dev.tsconfig.compilerOptions.lib, ['ES2020', 'DOM', 'DOM.Iterable'])
@@ -241,20 +248,31 @@ describe('composable TypeScript projections', () => {
   })
 
   it('lets an ordinary feature contribute Biome settings, files, packages, and targets', () => {
-    const { graph, project } = projector([library(), biome()])
-    const dev = project('dev:sync')
+    const { graph, workspace } = programFor([library(), biome()])
+    const dev = workspace('dev:sync')
 
-    assert.equal(graph.owners.biomeConfig, 'biome')
-    assert.deepEqual(graph.nodes.biomeToolPackages.tags, ['toolPackages'])
-    assert.deepEqual(graph.nodes.biomeGeneratedFiles.tags, ['generatedFiles'])
-    assert.deepEqual(graph.nodes.biomeLintTarget.tags, ['targets', 'buildDependencies'])
+    assert.equal(graph.owners['dev:sync/biomeConfig'], 'biome')
+    assert.deepEqual(graph.nodes['dev:sync/biomeToolPackages'].tags, ['dev:sync/toolPackages'])
+    assert.deepEqual(graph.nodes['dev:sync/biomeGeneratedFiles'].tags, ['dev:sync/generatedFiles'])
+    assert.deepEqual(graph.nodes['dev:sync/biomeLintTarget'].tags, [
+      'dev:sync/targets',
+      'dev:sync/buildDependencies',
+    ])
     assert.equal(dev.packageJson.devDependencies['@biomejs/biome'], '2')
     assert.deepEqual(dev.files['biome.json'], {
       formatter: { enabled: true },
       linter: { enabled: true },
     })
-    assert.equal(dev.targets['ci:lint'].command, 'pnpm exec biome check .')
-    assert.deepEqual(dev.targets['ci:build'].deps, ['ci:lint'])
+    const targets = programFor([library(), biome()]).targets
+    assert.equal(targets.find(target => target.name === 'lint').command, 'pnpm exec biome check .')
+    assert.deepEqual(targets.find(target => target.name === 'build').deps, ['ci:lint'])
+  })
+
+  it('rejects two feature targets claiming the same facet and name', () => {
+    assert.throws(
+      () => programFor([library(), biome(), eslint()]),
+      /target contribution "ci:lint" has more than one owner/,
+    )
   })
 
   it('lets features extend ESLint rules through settings and fails without ESLint', () => {
@@ -269,16 +287,16 @@ describe('composable TypeScript projections', () => {
       },
     })
 
-    const lint = projector([library(), eslint(), companyRules]).project('ci:lint')
+    const lint = programFor([library(), eslint(), companyRules]).workspace('ci:lint')
     assert.match(lint.files['eslint.config.mjs'], /consistent-type-imports/)
     assert.throws(
-      () => projector([library(), companyRules]).project('dev:sync'),
-      /Missing binding "eslint.enabled" required by "companyEslintRequirement"/,
+      () => programFor([library(), companyRules]).workspace('dev:sync'),
+      /Missing binding "dev:sync\/eslint.enabled" required by "dev:sync\/companyEslintRequirement"/,
     )
   })
 
   it('rejects derived package fields disguised as metadata', () => {
-    const { project } = typescriptProjector(di, {
+    const program = typescriptProgram(di, {
       location: '//packages/example',
       scope: 'internal',
       version: '1.2.3',
@@ -286,6 +304,6 @@ describe('composable TypeScript projections', () => {
       versions,
       features: [library()],
     })
-    assert.throws(() => project('dev:sync'), /cannot configure non-metadata field private/)
+    assert.throws(() => withWorkspaces(program), /cannot configure non-metadata field private/)
   })
 })

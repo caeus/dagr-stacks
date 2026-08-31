@@ -36,8 +36,9 @@ export function target(name, { kind = 'command', deps = [], ...options } = {}) {
   return Object.freeze({
     facet: name.slice(0, separator),
     name: name.slice(separator + 1),
+    intent: options.intent ?? (name.startsWith('publish:') ? 'publish' : name.slice(separator + 1)),
     kind,
-    ...options,
+    ...Object.fromEntries(Object.entries(options).filter(([key]) => key !== 'intent')),
     deps: Object.freeze([...deps]),
   })
 }
@@ -54,7 +55,7 @@ export function defineFeature(name, { inputs = {}, settings = {} } = {}) {
   }))
 }
 
-const hasAction = (actions, action) => actions.includes(action)
+const hasIntent = (intents, intent) => intents.includes(intent)
 
 const contributedTargetNames = contributions => Reflect.ownKeys(contributions)
   .map(name => contributions[name])
@@ -109,8 +110,8 @@ export function library({
     ),
     sourceAlias: calculated([], () => undefined),
     productToolPackages: calculated(
-      ['action', 'developmentActions', 'runtimeKind'],
-      (action, actions, runtime) => hasAction(actions, action)
+      ['intent', 'developmentIntents', 'runtimeKind'],
+      (intent, intents, runtime) => hasIntent(intents, intent)
         ? ['@tsconfig/strictest', ...(runtime === 'node' ? ['@types/node'] : []), 'typescript']
         : [],
       ['toolPackages'],
@@ -168,8 +169,8 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
     ),
-    productToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
-      hasAction(actions, action)
+    productToolPackages: calculated(['intent', 'developmentIntents'], (intent, intents) =>
+      hasIntent(intents, intent)
         ? ['@tsconfig/strictest', '@cloudflare/workers-types', 'typescript', 'wrangler']
         : [], ['toolPackages']),
     productRuntimePackages: calculated([], () => [], ['runtimePackages']),
@@ -218,8 +219,8 @@ export function viteReact({ language = 'ES2020' } = {}) {
       ['sourceDirectory'],
       directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
     ),
-    productToolPackages: calculated(['action', 'developmentActions'], (action, actions) =>
-      hasAction(actions, action)
+    productToolPackages: calculated(['intent', 'developmentIntents'], (intent, intents) =>
+      hasIntent(intents, intent)
         ? ['@tsconfig/strictest', '@types/node', '@types/react', '@types/react-dom', 'typescript', 'vite']
         : [], ['toolPackages']),
     productRuntimePackages: calculated([], () => viteRuntimePackages, ['runtimePackages']),
@@ -231,8 +232,8 @@ export function viteReact({ language = 'ES2020' } = {}) {
       (alias, directory) => ({ [alias.viteName]: `./${directory}` }),
     ),
     viteConfig: calculated(
-      ['action', 'viteActions', 'vite.plugins', 'vite.resolve.alias'],
-      (action, actions, plugins, alias) => hasAction(actions, action)
+      ['intent', 'viteIntents', 'vite.plugins', 'vite.resolve.alias'],
+      (intent, intents, plugins, alias) => hasIntent(intents, intent)
         ? `import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -289,8 +290,8 @@ export function prettier({
     formatSingleQuotes: external(),
     formatPrintWidth: external(),
     formatTrailingCommas: external(),
-    prettierToolPackages: calculated(['action', 'prettierActions'], (action, actions) =>
-      hasAction(actions, action) ? ['prettier'] : [], ['toolPackages']),
+    prettierToolPackages: calculated(['intent', 'prettierIntents'], (intent, intents) =>
+      hasIntent(intents, intent) ? ['prettier'] : [], ['toolPackages']),
     'prettier.$schema': calculated([], () => 'https://json.schemastore.org/prettierrc'),
     'prettier.semi': calculated(['formatSemicolons'], value => value),
     'prettier.tabWidth': calculated(['formatTabWidth'], value => value),
@@ -299,8 +300,8 @@ export function prettier({
     'prettier.trailingComma': calculated(['formatTrailingCommas'], value => value),
     prettierConfig: calculated(
       [
-        'action',
-        'prettierActions',
+        'intent',
+        'prettierIntents',
         'prettier.$schema',
         'prettier.semi',
         'prettier.tabWidth',
@@ -308,8 +309,8 @@ export function prettier({
         'prettier.printWidth',
         'prettier.trailingComma',
       ],
-      (action, actions, schema, semicolons, width, quotes, printWidth, commas) =>
-        hasAction(actions, action)
+      (intent, intents, schema, semicolons, width, quotes, printWidth, commas) =>
+        hasIntent(intents, intent)
           ? { $schema: schema, semi: semicolons, tabWidth: width, singleQuote: quotes, printWidth, trailingComma: commas }
           : undefined,
     ),
@@ -329,17 +330,17 @@ export function biome({ formatter = true, linter = true } = {}) {
       biomeLinterIntent: linter,
     },
     settings: {
-      biomeActions: value(Object.freeze(['dev', 'lint'])),
+      biomeIntents: value(Object.freeze(['dev', 'lint'])),
       biomeToolPackages: setting(
-        ['action', 'biomeActions'],
-        (action, actions) => hasAction(actions, action) ? ['@biomejs/biome'] : [],
+        ['intent', 'biomeIntents'],
+        (intent, intents) => hasIntent(intents, intent) ? ['@biomejs/biome'] : [],
         { tags: ['toolPackages'] },
       ),
       'biome.formatter.enabled': setting(['biomeFormatterIntent'], enabled => enabled),
       'biome.linter.enabled': setting(['biomeLinterIntent'], enabled => enabled),
       biomeConfig: setting(
-        ['action', 'biomeActions', 'biome.formatter.enabled', 'biome.linter.enabled'],
-        (action, actions, formatterEnabled, linterEnabled) => hasAction(actions, action)
+        ['intent', 'biomeIntents', 'biome.formatter.enabled', 'biome.linter.enabled'],
+        (intent, intents, formatterEnabled, linterEnabled) => hasIntent(intents, intent)
           ? { formatter: { enabled: formatterEnabled }, linter: { enabled: linterEnabled } }
           : undefined,
       ),
@@ -372,11 +373,11 @@ export function vitest({ environment = 'node', globals = false, typecheck = fals
     testGlobalsIntent: external(),
     testTypecheckIntent: external(),
     ...(environment === 'jsdom' ? { vitestViteRequirement: requires('viteConfig') } : {}),
-    vitestToolPackages: calculated(['action', 'vitestDependencyActions', 'testEnvironment'], (action, actions, env) =>
-      hasAction(actions, action) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : [], ['toolPackages']),
+    vitestToolPackages: calculated(['intent', 'vitestDependencyIntents', 'testEnvironment'], (intent, intents, env) =>
+      hasIntent(intents, intent) ? ['vitest', ...(env === 'jsdom' ? ['jsdom'] : [])] : [], ['toolPackages']),
     vitestAmbientTypes: calculated(
-      ['action', 'vitestTypeActions', 'testGlobalsIntent'],
-      (action, actions, globals) => globals && hasAction(actions, action) ? ['vitest/globals'] : [],
+      ['intent', 'vitestTypeIntents', 'testGlobalsIntent'],
+      (intent, intents, globals) => globals && hasIntent(intents, intent) ? ['vitest/globals'] : [],
       ['ambientTypes'],
     ),
     'vitest.test.environment': calculated(['testEnvironment'], value => value),
@@ -392,16 +393,16 @@ export function vitest({ environment = 'node', globals = false, typecheck = fals
     ),
     vitestConfig: calculated(
       [
-        'action',
-        'vitestActions',
+        'intent',
+        'vitestIntents',
         'vitest.test.environment',
         'vitest.test.globals',
         'vitest.test.typecheck.enabled',
         'vitest.test.exclude',
         'vitest.test.root',
       ],
-      (action, actions, env, globals, typecheckEnabled, exclude, root) => {
-        if (!hasAction(actions, action)) return undefined
+      (intent, intents, env, globals, typecheckEnabled, exclude, root) => {
+        if (!hasIntent(intents, intent)) return undefined
         if (env === 'jsdom') return `import { fileURLToPath } from 'node:url'
 import { defineConfig, configDefaults, mergeConfig } from 'vitest/config'
 import viteConfig from './vite.config'
@@ -451,8 +452,8 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
     lintExplicitReturnTypesIntent: external(),
     'eslint.enabled': calculated([], () => true),
     eslintToolPackages: calculated(
-      ['action', 'eslintActions', 'lintFormattingIntent'],
-      (action, actions, formatting) => hasAction(actions, action)
+      ['intent', 'eslintIntents', 'lintFormattingIntent'],
+      (intent, intents, formatting) => hasIntent(intents, intent)
         ? [
             '@eslint/js',
             '@typescript-eslint/eslint-plugin',
@@ -518,15 +519,15 @@ export function eslint({ prettier: enforceFormatting = false, explicitReturnType
     ),
     eslintConfig: calculated(
       [
-        'action',
-        'eslintActions',
+        'intent',
+        'eslintIntents',
         'lintFormattingIntent',
         'eslint.files',
         'eslint.testFiles',
         'eslint.languageOptions.parserOptions.project',
         'eslintRules',
       ],
-      (action, actions, formatting, files, testFiles, project, rules) => hasAction(actions, action)
+      (intent, intents, formatting, files, testFiles, project, rules) => hasIntent(intents, intent)
         ? `import js from '@eslint/js'
 import parser from '@typescript-eslint/parser'
 import plugin from '@typescript-eslint/eslint-plugin'
@@ -570,8 +571,8 @@ export function typedoc({ title } = {}) {
   const externalValues = { documentationTitle: title }
   const module = calculationModule('typedoc', {
     documentationTitle: external(),
-    typedocToolPackages: calculated(['action', 'typedocActions'], (action, actions) =>
-      hasAction(actions, action) ? ['typedoc'] : [], ['toolPackages']),
+    typedocToolPackages: calculated(['intent', 'typedocIntents'], (intent, intents) =>
+      hasIntent(intents, intent) ? ['typedoc'] : [], ['toolPackages']),
     'typedoc.entryPoints': calculated(['sourceEntry'], entry => [entry]),
     'typedoc.name': calculated(
       ['documentationTitle', 'name'],
@@ -587,8 +588,8 @@ export function typedoc({ title } = {}) {
     ),
     typedocConfig: calculated(
       [
-        'action',
-        'typedocActions',
+        'intent',
+        'typedocIntents',
         'typedoc.entryPoints',
         'typedoc.name',
         'typedoc.includeVersion',
@@ -597,8 +598,8 @@ export function typedoc({ title } = {}) {
         'typedoc.excludeProtected',
         'typedoc.exclude',
       ],
-      (action, actions, entryPoints, name, includeVersion, excludeExternals,
-        excludePrivate, excludeProtected, exclude) => hasAction(actions, action)
+      (intent, intents, entryPoints, name, includeVersion, excludeExternals,
+        excludePrivate, excludeProtected, exclude) => hasIntent(intents, intent)
         ? { entryPoints, name, includeVersion, excludeExternals, excludePrivate, excludeProtected, exclude }
         : undefined,
     ),

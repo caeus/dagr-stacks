@@ -278,7 +278,7 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
     baseAmbientTypes: di.toFun([], () => ['@cloudflare/workers-types'], ['ambientTypes']),
     sourceAlias: di.toFun(
       ['sourceDirectory'],
-      directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
+      directory => ({ specifier: '#/*', sourcePath: `./${directory}/*` }),
     ),
     productToolPackages: di.toFun(['intent', 'developmentIntents'], (intent, intents) =>
       hasIntent(intents, intent)
@@ -326,7 +326,7 @@ export function viteReact({ language = 'ES2020' } = {}) {
     baseAmbientTypes: di.toFun([], () => [], ['ambientTypes']),
     sourceAlias: di.toFun(
       ['sourceDirectory'],
-      directory => ({ specifier: '#*', sourcePath: `./${directory}/*`, viteName: '#' }),
+      directory => ({ specifier: '#/*', sourcePath: `./${directory}/*` }),
     ),
     productToolPackages: di.toFun(['intent', 'developmentIntents'], (intent, intents) =>
       hasIntent(intents, intent)
@@ -353,23 +353,30 @@ export function viteReact({ language = 'ES2020' } = {}) {
     viteIntents: di.toFun([], () => Object.freeze(['dev', 'test', 'build'])),
     'vite.plugins': di.toFun([], () => ['react', 'tailwindcss']),
     'vite.resolve.alias': di.toFun(
-      ['sourceAlias', 'sourceDirectory'],
-      (alias, directory) => ({ [alias.viteName]: `./${directory}` }),
+      ['sourceAlias'],
+      alias => ({
+        [alias.specifier.replace(/\*$/, '')]: alias.sourcePath.replace(/\*$/, ''),
+      }),
     ),
     viteConfig: di.toFun(
       ['intent', 'viteIntents', 'vite.plugins', 'vite.resolve.alias'],
-      (intent, intents, plugins, alias) => hasIntent(intents, intent)
-        ? `import { fileURLToPath, URL } from 'node:url'
+      (intent, intents, plugins, aliases) => {
+        if (!hasIntent(intents, intent)) return undefined
+        const renderedAliases = Object.entries(aliases)
+          .map(([specifier, path]) =>
+            `${JSON.stringify(specifier)}: fileURLToPath(new URL(${JSON.stringify(path)}, import.meta.url))`)
+          .join(', ')
+        return `import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [${plugins.map(plugin => `${plugin}()`).join(', ')}],
-  resolve: { alias: { '#': fileURLToPath(new URL(${JSON.stringify(alias['#'])}, import.meta.url)) } },
+  resolve: { alias: { ${renderedAliases} } },
 })
 `
-        : undefined,
+      },
     ),
     viteGeneratedFiles: di.toFun(
       ['viteConfig'],

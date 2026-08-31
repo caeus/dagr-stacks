@@ -190,12 +190,33 @@ class Module {
   /**
    * Returns a module where definitions from `other` override definitions from this module.
    *
-   * @param {Module} other
+   * @param {{
+   *   keys: () => IterableIterator<PropertyKey>,
+   *   definitionOf: (name: PropertyKey) => Definition<unknown> | undefined
+   * }} other
    * @returns {Module}
    */
   merge(other) {
-    if (!(other instanceof Module)) throw new TypeError('Can only merge another DI module')
-    return new Module(new Map([...this.#bindings, ...other.#bindings]))
+    if (
+      other === null
+      || typeof other !== 'object'
+      || typeof other.keys !== 'function'
+      || typeof other.definitionOf !== 'function'
+    ) {
+      throw new TypeError('Can only merge another DI module')
+    }
+    const merged = new Map(this.#bindings)
+    for (const name of other.keys()) {
+      const binding = other.definitionOf(name)
+      if (binding === undefined) {
+        throw new TypeError(`DI module has no definition for ${bindingName(name)}`)
+      }
+      merged.set(
+        normalizeBindingKey(name),
+        definition(binding.deps, binding.factory, binding.tags ?? []),
+      )
+    }
+    return new Module(merged)
   }
 
   /**

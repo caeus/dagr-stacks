@@ -265,6 +265,24 @@ describe('composable TypeScript workspaces', () => {
     assert.equal(pack.packageJson.main, './dist/index.js')
   })
 
+  it('projects one import alias to source and runtime destinations', () => {
+    const aliases = di.module({
+      importAlias: di.toFun(
+        ['sourceDirectory', 'outputDirectory'],
+        (source, output) => ({
+          specifier: '#*',
+          sourcePath: `./${source}/*`,
+          runtimePath: `./${output}/*`,
+        }),
+      ),
+    })
+    const { workspace } = moduleFor([library({ runtime: 'node' }), aliases])
+    const build = workspace('ci:build')
+
+    assert.deepEqual(build.tsconfig.compilerOptions.paths, { '#*': ['./src/*'] })
+    assert.deepEqual(build.packageJson.imports, { '#*': './dist/*' })
+  })
+
   it('derives worker policy instead of accepting raw tsconfig', () => {
     const { workspace } = moduleFor([cloudflareWorker(), prettier()])
     const dev = workspace('dev:sync')
@@ -286,7 +304,7 @@ describe('composable TypeScript workspaces', () => {
     const dev = workspace('dev:sync')
     const build = workspace('ci:build')
 
-    assert.deepEqual(graph.nodes['dev:sync/vite.resolve.alias'].deps, ['dev:sync/sourceAlias'])
+    assert.deepEqual(graph.nodes['dev:sync/vite.resolve.alias'].deps, ['dev:sync/importAlias'])
     assert.equal(dev.packageJson.dependencies.react, '19')
     assert.deepEqual(dev.packageJson.imports, { '#/*': './src/*' })
     assert.deepEqual(dev.tsconfig.compilerOptions.paths, { '#/*': ['./src/*'] })

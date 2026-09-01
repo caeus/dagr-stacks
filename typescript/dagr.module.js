@@ -254,8 +254,8 @@ const packageModule = () => di.module({
     (product, distribution, artifacts) => product === 'library' && distribution ? artifacts : undefined,
   ),
   'packageJson.imports': di.toFun(
-    ['sourceAlias'],
-    alias => alias === undefined ? undefined : { [alias.specifier]: alias.sourcePath },
+    ['importAlias'],
+    alias => alias === undefined ? undefined : { [alias.specifier]: alias.runtimePath },
   ),
   'packageJson.dependencies': di.toFun(
     ['dependencyEntries'],
@@ -325,7 +325,7 @@ const tsconfigModule = () => di.module({
     value => value.length > 0 ? value : undefined,
   ),
   'tsconfig.compilerOptions.paths': di.toFun(
-    ['sourceAlias'],
+    ['importAlias'],
     alias => alias === undefined ? undefined : { [alias.specifier]: [alias.sourcePath] },
   ),
   'tsconfig.compilerOptions.allowImportingTsExtensions': di.toFun(

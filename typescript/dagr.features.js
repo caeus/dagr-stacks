@@ -227,7 +227,7 @@ export function library({
       runtime => runtime === 'node' ? ['node'] : [],
       ['ambientTypes'],
     ),
-    sourceAlias: di.toFun([], () => undefined),
+    importAlias: di.toFun([], () => undefined),
     productToolPackages: di.toFun(
       ['intent', 'developmentIntents', 'runtimeKind'],
       (intent, intents, runtime) => hasIntent(intents, intent)
@@ -276,9 +276,13 @@ export function cloudflareWorker({ language = 'ES2022' } = {}) {
     moduleResolutionKind: di.toFun([], () => 'NodeNext'),
     standardLibraries: di.toFun(['languageTarget'], target => [target]),
     baseAmbientTypes: di.toFun([], () => ['@cloudflare/workers-types'], ['ambientTypes']),
-    sourceAlias: di.toFun(
+    importAlias: di.toFun(
       ['sourceDirectory'],
-      directory => ({ specifier: '#/*', sourcePath: `./${directory}/*` }),
+      directory => ({
+        specifier: '#/*',
+        sourcePath: `./${directory}/*`,
+        runtimePath: `./${directory}/*`,
+      }),
     ),
     productToolPackages: di.toFun(['intent', 'developmentIntents'], (intent, intents) =>
       hasIntent(intents, intent)
@@ -324,9 +328,13 @@ export function viteReact({ language = 'ES2020' } = {}) {
     moduleResolutionKind: di.toFun([], () => 'Bundler'),
     standardLibraries: di.toFun(['languageTarget'], target => [target, 'DOM', 'DOM.Iterable']),
     baseAmbientTypes: di.toFun([], () => [], ['ambientTypes']),
-    sourceAlias: di.toFun(
+    importAlias: di.toFun(
       ['sourceDirectory'],
-      directory => ({ specifier: '#/*', sourcePath: `./${directory}/*` }),
+      directory => ({
+        specifier: '#/*',
+        sourcePath: `./${directory}/*`,
+        runtimePath: `./${directory}/*`,
+      }),
     ),
     productToolPackages: di.toFun(['intent', 'developmentIntents'], (intent, intents) =>
       hasIntent(intents, intent)
@@ -353,7 +361,7 @@ export function viteReact({ language = 'ES2020' } = {}) {
     viteIntents: di.toFun([], () => Object.freeze(['dev', 'test', 'build'])),
     'vite.plugins': di.toFun([], () => ['react', 'tailwindcss']),
     'vite.resolve.alias': di.toFun(
-      ['sourceAlias'],
+      ['importAlias'],
       alias => ({
         [alias.specifier.replace(/\*$/, '')]: alias.sourcePath.replace(/\*$/, ''),
       }),

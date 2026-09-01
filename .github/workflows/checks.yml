@@ -17,3 +17,23 @@ jobs:
       - run: node --test tests/*.test.js
         env:
           NODE_OPTIONS: --experimental-vm-modules
+
+  stack-image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [di, typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build stack image
+        env:
+          STACK: ${{ matrix.stack }}
+        run: |
+          docker build \
+            --build-arg STACK="$STACK" \
+            --build-arg SOURCE="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --build-arg REVISION="$GITHUB_SHA" \
+            --tag "dagr-stack-$STACK:test" \
+            --file .github/stack.Dockerfile \
+            .
+          test "$(docker image inspect "dagr-stack-$STACK:test" --format '{{.Config.WorkingDir}}')" = /stack

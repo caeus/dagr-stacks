@@ -46,6 +46,20 @@ describe('di', () => {
     assert.equal(merged.compile().answer, 42)
   })
 
+  it('merges modules loaded through separate JavaScript module instances', async () => {
+    const foreignDi = (await import('../di/dagr.di.js?foreign-module')).default
+    const left = di.module({ name: toValue('left') })
+    const right = foreignDi.module({
+      name: foreignDi.toValue('right'),
+      answer: foreignDi.toValue(42),
+    })
+
+    const merged = left.merge(right).compile()
+
+    assert.equal(merged.name, 'right')
+    assert.equal(merged.answer, 42)
+  })
+
   it('exposes immutable definitions', () => {
     const module = di.module({ answer: toValue(42) })
     const binding = module.definitionOf('answer')

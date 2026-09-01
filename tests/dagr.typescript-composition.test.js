@@ -269,14 +269,15 @@ describe('composable TypeScript workspaces', () => {
     const { workspace } = moduleFor([cloudflareWorker(), prettier()])
     const dev = workspace('dev:sync')
 
-    assert.equal(dev.packageJson.imports['#*'], './src/*')
+    assert.equal(dev.packageJson.imports['#/*'], './src/*')
+    assert.deepEqual(dev.tsconfig.compilerOptions.paths['#/*'], ['./src/*'])
     assert.equal(dev.tsconfig.compilerOptions.moduleResolution, 'NodeNext')
     assert.deepEqual(dev.tsconfig.compilerOptions.types, ['@cloudflare/workers-types'])
     assert.deepEqual(dev.allowBuilds.sort(), ['sharp', 'workerd'])
   })
 
   it('derives the Vite React runtime, browser compiler, and test environment', () => {
-    const { workspace } = moduleFor([
+    const { graph, workspace } = moduleFor([
       viteReact(),
       prettier(),
       eslint(),
@@ -285,7 +286,11 @@ describe('composable TypeScript workspaces', () => {
     const dev = workspace('dev:sync')
     const build = workspace('ci:build')
 
+    assert.deepEqual(graph.nodes['dev:sync/vite.resolve.alias'].deps, ['dev:sync/sourceAlias'])
     assert.equal(dev.packageJson.dependencies.react, '19')
+    assert.deepEqual(dev.packageJson.imports, { '#/*': './src/*' })
+    assert.deepEqual(dev.tsconfig.compilerOptions.paths, { '#/*': ['./src/*'] })
+    assert.match(dev.files['vite.config.ts'], /"#\/": fileURLToPath\(new URL\("\.\/src\/"/)
     assert.deepEqual(dev.tsconfig.compilerOptions.lib, ['ES2020', 'DOM', 'DOM.Iterable'])
     assert.match(dev.files['vitest.config.ts'], /environment: "jsdom"/)
     assert.deepEqual(build.buildAssets, ['index.html', 'public'])

@@ -1,0 +1,46 @@
+name: Publish stack images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [di, typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: stack
+        env:
+          STACK: ${{ matrix.stack }}
+        run: echo "tree_sha=$(git rev-parse HEAD:$STACK)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/stack.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            STACK=${{ matrix.stack }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
+            REVISION=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/dagr-stacks-${{ matrix.stack }}:${{ steps.stack.outputs.tree_sha }}
+            ghcr.io/${{ github.repository_owner }}/dagr-stacks-${{ matrix.stack }}:latest

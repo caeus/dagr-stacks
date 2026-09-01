@@ -40,15 +40,40 @@ Each top-level directory contains one independently consumable component. Build 
 - Its default export is the stack factory.
 - Everything needed by a stack lives inside its directory.
 - Component directories contain only files consumers may mount; repository tests live in `tests/`.
-- Consumers pin an exact commit and mount only the desired directory.
+- Published components are immutable filesystem images tagged by their Git tree SHA.
+- `latest` is published for convenience; consumers should pin the tree SHA.
 - Release tags are scoped by stack, for example `ts-library/v1.2.0`.
 
 Supporting components use a descriptive `dagr.*.js` entry point instead.
 
-A consuming repository mounts a stack under `stacks/<alias>` and imports across the mount boundary:
+## Mounting
+
+Published components can be mounted directly from GHCR. For example:
 
 ```js
-import typescript from '//stacks/ts-library//dagr.stack.js'
+export default {
+  '/': {
+    FROM: 'ghcr.io/caeus/dagr-stacks-typescript:<tree-sha>',
+    steps: [],
+    IGNORE: [],
+  },
+}
+```
+
+The image's final `WORKDIR` is `/stack`, so Dagr materializes the component contents directly. The
+`typescript` image also pins its `di` mount to the matching immutable DI image, avoiding Git clone
+and sparse-checkout setup throughout the mount tree.
+
+Images currently published on `main` are:
+
+- `ghcr.io/caeus/dagr-stacks-di`
+- `ghcr.io/caeus/dagr-stacks-typescript`
+
+A consuming repository can then mount a stack under `stacks/<alias>` and import across the mount
+boundary:
+
+```js
+import typescript from '//stacks/ts//dagr.stack.js'
 
 const stack = typescript({
   base: '//packages/base:ci:node-pnpm',
@@ -61,8 +86,8 @@ export default stack({
 })
 ```
 
-The alias belongs to the consuming repository. The directory and commit being mounted are explicit,
-reviewable build inputs.
+The alias belongs to the consuming repository. The image tag is an explicit, reviewable build
+input. Source mounts remain possible when working directly from a repository checkout.
 
 ## Available components
 

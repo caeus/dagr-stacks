@@ -60,11 +60,11 @@ export default {
 }
 ```
 
-The image's final `WORKDIR` is `/stack`, so Dagr materializes the component contents directly. The
-`typescript` image also pins its `di` mount to the matching immutable DI image, avoiding Git clone
-and sparse-checkout setup throughout the mount tree.
+The image's final `WORKDIR` is `/stack`, so Dagr materializes the component contents directly.
+Nested mounts keep their existing source-based pins until the corresponding image already exists;
+consumers never need to reference an artifact before it has been published.
 
-Images currently published on `main` are:
+The main-branch publish workflow publishes:
 
 - `ghcr.io/caeus/dagr-stacks-di`
 - `ghcr.io/caeus/dagr-stacks-typescript`

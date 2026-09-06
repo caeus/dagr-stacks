@@ -48,29 +48,43 @@ Supporting components use a descriptive `dagr.*.js` entry point instead.
 
 ## Mounting
 
-Published components can be mounted directly from GHCR. For example:
+A consuming repository requests the TypeScript component at the attachment point:
 
-```js
-export default {
-  '/': {
-    FROM: 'ghcr.io/caeus/dagr-stacks-typescript:<tree-sha>',
-    steps: [],
-    IGNORE: [],
-  },
-}
+```yaml
+# stacks/ts/dagr.mount.yaml
+repo: github.com/caeus/dagr-stacks/typescript
 ```
 
-The image's final `WORKDIR` is `/stack`, so Dagr materializes the component contents directly.
-Nested mounts keep their existing source-based pins until the corresponding image already exists;
-consumers never need to reference an artifact before it has been published.
+The invocation root owns identity and implementation policy:
+
+```js
+// .dagr/config.js
+export const identifyVolume = request => request.repo
+```
+
+```yaml
+# .dagr/volumes.yaml
+"github.com/caeus/dagr-stacks/typescript":
+  FROM: ghcr.io/caeus/dagr-stacks-typescript:<tree-sha>
+  steps: []
+  IGNORE: []
+
+"github.com/caeus/dagr-stacks/di":
+  FROM: ghcr.io/caeus/dagr-stacks-di:7de90f567348a68cdbff0968757d7f49096b1aab
+  steps: []
+  IGNORE: []
+```
+
+The TypeScript component requests the DI component through its nested `di/dagr.mount.yaml`, so the
+root registry provides implementations for both volume IDs. Published images finish with
+`WORKDIR /stack`, which Dagr materializes as the volume root.
 
 The main-branch publish workflow publishes:
 
 - `ghcr.io/caeus/dagr-stacks-di`
 - `ghcr.io/caeus/dagr-stacks-typescript`
 
-A consuming repository can then mount a stack under `stacks/<alias>` and import across the mount
-boundary:
+The consuming repository can then import across the mount boundary:
 
 ```js
 import typescript from '//stacks/ts//dagr.stack.js'
@@ -86,8 +100,7 @@ export default stack({
 })
 ```
 
-The alias belongs to the consuming repository. The image tag is an explicit, reviewable build
-input. Source mounts remain possible when working directly from a repository checkout.
+The alias belongs to the consuming repository. Image tags are explicit, reviewable build inputs.
 
 ## Available components
 
